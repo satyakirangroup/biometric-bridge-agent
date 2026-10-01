@@ -1,0 +1,21 @@
+{
+  "machine": {
+    "ip": "192.168.1.224",
+    "port": 5005,
+    "machineNumber": 1,
+    "password": 0,
+    "deviceName": "Sonipat Plant Biometric Machine"
+  },
+  "cloud": {
+    "apiUrl": "https://api.satyakiran.co.in/api/v1/hrms/attendance/biometric-push",
+    "authToken": "satyakiran_biometric_2026",
+    "branchId": "0fe39d99-31fb-4753-aa6c-704499bdbba9",
+    "syncIntervalSeconds": 30
+  },
+  "options": {
+    "clearDeviceLogsAfterSync": false,
+    "syncStateFile": "./sync-state.json",
+    "maxBatchSize": 100,
+    "retryIntervalSeconds": 10
+  }
+}
