@@ -74,9 +74,9 @@ class SbxpcConnector {
         $ErrorActionPreference = 'Stop'
         try {
           $sbx = New-Object -ComObject "SBXPC.SBXPCCtrl.1"
-          $conn = $sbx.OpenNetwork(${this.machineNumber}, "${this.ip}", ${this.port}, ${this.password})
+          $conn = $sbx.ConnectTcpip(${this.machineNumber}, "${this.ip}", ${this.port}, ${this.password})
           if (-not $conn) {
-            Write-Output "ERROR: Failed to open network connection to ${this.ip}:${this.port}"
+            Write-Output "ERROR: Failed to connect to biometric machine at ${this.ip}:${this.port} (ConnectTcpip returned false)"
             exit 1
           }
 
@@ -121,7 +121,7 @@ class SbxpcConnector {
             }
           }
 
-          $sbx.CloseCommPort()
+          try { $sbx.Disconnect() } catch { $sbx.CloseCommPort() }
           Write-Output ($logs | ConvertTo-Json -Compress)
         } catch {
           Write-Output "ERROR: $($_.Exception.Message)"

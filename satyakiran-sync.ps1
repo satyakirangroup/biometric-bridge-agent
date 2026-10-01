@@ -85,7 +85,7 @@ while ($KeepRunning) {
     try {
         # Initialize COM Object
         $sbx = New-Object -ComObject "SBXPC.SBXPCCtrl.1" -ErrorAction Stop
-        $conn = $sbx.OpenNetwork($MachineNum, $MachineIp, $MachinePort, $MachinePass)
+        $conn = $sbx.ConnectTcpip($MachineNum, $MachineIp, $MachinePort, $MachinePass)
         
         if ($conn) {
             # -------------------------------------------------------------
@@ -238,7 +238,7 @@ while ($KeepRunning) {
                 }
             }
 
-            $sbx.CloseCommPort()
+            try { $sbx.Disconnect() } catch { $sbx.CloseCommPort() }
         } else {
             Write-Host "[$NowStr] ⚠️  Cannot reach biometric device at $MachineIp`:$MachinePort (Device offline or busy)" -ForegroundColor Yellow
         }
