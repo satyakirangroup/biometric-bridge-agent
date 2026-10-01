@@ -73,57 +73,59 @@ class SbxpcConnector {
       const psScript = `
         $ErrorActionPreference = 'Stop'
         try {
-          $sbx = New-Object -ComObject "SBXPC.SBXPCCtrl.1"
-          try { $sbx.DotNET() } catch {}
-          $conn = $sbx.ConnectTcpip(${this.machineNumber}, "${this.ip}", ${this.port}, ${this.password})
-          if (-not $conn) {
-            Write-Output "ERROR: Failed to connect to biometric machine at ${this.ip}:${this.port} (ConnectTcpip returned false)"
-            exit 1
-          }
+          if (-not ([System.Management.Automation.PSTypeName]'SbxBridge').Type) {
+            Add-Type -TypeDefinition @"
+using System;
+using System.Collections.Generic;
 
-          $hasLogs = $sbx.ReadGeneralLogData(${this.machineNumber})
-          $logs = @()
+public class SbxBridge {
+    public static string FetchLogsJson(int machineNum, string ip, int port, int password, string deviceName) {
+        Type comType = Type.GetTypeFromProgID("SBXPC.SBXPCCtrl.1");
+        if (comType == null) throw new Exception("COM class SBXPC.SBXPCCtrl.1 is not registered in Windows.");
+        
+        dynamic sbx = Activator.CreateInstance(comType);
+        try { sbx.DotNET(); } catch {}
 
-          if ($hasLogs) {
-            $enrollNo = 0
-            $verifyMode = 0
-            $inOutMode = 0
-            $year = 0
-            $month = 0
-            $day = 0
-            $hour = 0
-            $minute = 0
-            $second = 0
+        bool ok = false;
+        try {
+            ok = (bool)sbx.ConnectTcpip(machineNum, ip, port, password);
+        } catch (Exception ex) {
+            throw new Exception("ConnectTcpip failed: " + ex.Message);
+        }
 
-            while ($sbx.GetGeneralLogData(${this.machineNumber}, [ref]$enrollNo, [ref]$verifyMode, [ref]$inOutMode, [ref]$year, [ref]$month, [ref]$day, [ref]$hour, [ref]$minute, [ref]$second)) {
-              $monthStr = "{0:D2}" -f $month
-              $dayStr = "{0:D2}" -f $day
-              $hourStr = "{0:D2}" -f $hour
-              $minStr = "{0:D2}" -f $minute
-              $secStr = "{0:D2}" -f $second
-              $dtStr = "$year-$monthStr-$dayStr " + $hourStr + ":" + $minStr + ":" + $secStr
-              
-              $dir = "AUTO"
-              if ($inOutMode -eq 1) { $dir = "IN" }
-              elseif ($inOutMode -eq 2) { $dir = "OUT" }
+        if (!ok) {
+            throw new Exception("Cannot connect to biometric machine at " + ip + ":" + port + " (Device offline or busy)");
+        }
 
-              $vMode = "Face"
-              if ($verifyMode -eq 1) { $vMode = "Fingerprint" }
-              elseif ($verifyMode -eq 2) { $vMode = "Card" }
+        List<string> items = new List<string>();
+        try {
+            bool hasLogs = (bool)sbx.ReadGeneralLogData(machineNum);
+            if (hasLogs) {
+                int enrollNo = 0;
+                int verifyMode = 0;
+                int inOutMode = 0;
+                int y = 0, m = 0, d = 0, h = 0, min = 0, s = 0;
 
-              $logs += [PSCustomObject]@{
-                employeeCode = $enrollNo.ToString()
-                logDateTime = $dtStr
-                direction = $dir
-                verificationMode = $vMode
-                deviceSerial = "${this.ip}"
-                deviceName = "${this.deviceName}"
-              }
+                while ((bool)sbx.GetGeneralLogData(machineNum, ref enrollNo, ref verifyMode, ref inOutMode, ref y, ref m, ref d, ref h, ref min, ref s)) {
+                    string dt = string.Format("{0:D4}-{1:D2}-{2:D2} {3:D2}:{4:D2}:{5:D2}", y, m, d, h, min, s);
+                    string dir = inOutMode == 1 ? "IN" : (inOutMode == 2 ? "OUT" : "AUTO");
+                    string vm = verifyMode == 1 ? "Fingerprint" : (verifyMode == 2 ? "Card" : "Face");
+                    
+                    items.Add("{\\"employeeCode\\":\\"" + enrollNo + "\\",\\"logDateTime\\":\\"" + dt + "\\",\\"direction\\":\\"" + dir + "\\",\\"verificationMode\\":\\"" + vm + "\\",\\"deviceSerial\\":\\"" + ip + "\\",\\"deviceName\\":\\"" + deviceName + "\\"}");
+                }
             }
+        } finally {
+            try { sbx.Disconnect(); } catch { try { sbx.CloseCommPort(); } catch {} }
+        }
+
+        return "[" + string.Join(",", items.ToArray()) + "]";
+    }
+}
+"@ -Language CSharp
           }
 
-          try { $sbx.Disconnect() } catch { $sbx.CloseCommPort() }
-          Write-Output ($logs | ConvertTo-Json -Compress)
+          $json = [SbxBridge]::FetchLogsJson(${this.machineNumber}, "${this.ip}", ${this.port}, ${this.password}, "${this.deviceName}")
+          Write-Output $json
         } catch {
           Write-Output "ERROR: $($_.Exception.Message)"
           exit 1
