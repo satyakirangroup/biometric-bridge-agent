@@ -6,6 +6,8 @@
   "type": "commonjs",
   "scripts": {
     "start": "node src/index.js",
+    "sync:all": "node src/sync-history.js",
+    "sync:history": "node src/sync-history.js",
     "test-connection": "node src/test-connection.js"
   },
   "dependencies": {},
