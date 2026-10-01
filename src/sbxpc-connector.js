@@ -74,6 +74,7 @@ class SbxpcConnector {
         $ErrorActionPreference = 'Stop'
         try {
           $sbx = New-Object -ComObject "SBXPC.SBXPCCtrl.1"
+          try { $sbx.DotNET() } catch {}
           $conn = $sbx.ConnectTcpip(${this.machineNumber}, "${this.ip}", ${this.port}, ${this.password})
           if (-not $conn) {
             Write-Output "ERROR: Failed to connect to biometric machine at ${this.ip}:${this.port} (ConnectTcpip returned false)"

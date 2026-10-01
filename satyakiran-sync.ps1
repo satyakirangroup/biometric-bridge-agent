@@ -85,6 +85,7 @@ while ($KeepRunning) {
     try {
         # Initialize COM Object
         $sbx = New-Object -ComObject "SBXPC.SBXPCCtrl.1" -ErrorAction Stop
+        try { $sbx.DotNET() } catch {}
         $conn = $sbx.ConnectTcpip($MachineNum, $MachineIp, $MachinePort, $MachinePass)
         
         if ($conn) {

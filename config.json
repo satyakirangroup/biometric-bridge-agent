@@ -1,6 +1,6 @@
 {
   "machine": {
-    "ip": "192.168.1.224",
+    "ip": "192.168.1.14",
     "port": 5005,
     "machineNumber": 1,
     "password": 0,
