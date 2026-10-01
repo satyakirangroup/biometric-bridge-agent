@@ -39,6 +39,13 @@ async function syncCycle() {
       return;
     }
 
+    // Auto-save raw logs snapshot to local files for offline verification
+    try {
+      const logsDir = path.resolve(__dirname, "../logs");
+      if (!fs.existsSync(logsDir)) fs.mkdirSync(logsDir, { recursive: true });
+      fs.writeFileSync(path.join(logsDir, "raw_machine_punches.json"), JSON.stringify(rawLogs, null, 2), "utf-8");
+    } catch {}
+
     // 2. Filter out logs that were already synced
     const newLogs = rawLogs.filter((log) => !stateManager.isAlreadySynced(log));
 

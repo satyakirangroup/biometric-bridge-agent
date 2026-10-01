@@ -8,7 +8,8 @@
     "start": "node src/index.js",
     "sync:all": "node src/sync-history.js",
     "sync:history": "node src/sync-history.js",
-    "test-connection": "node src/test-connection.js"
+    "test-connection": "node src/test-connection.js",
+    "view:raw": "node src/view-raw-logs.js"
   },
   "dependencies": {},
   "engines": {
