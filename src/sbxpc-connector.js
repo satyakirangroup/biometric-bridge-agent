@@ -1,6 +1,8 @@
 const { spawn } = require("child_process");
 const net = require("net");
 const os = require("os");
+const fs = require("fs");
+const path = require("path");
 
 class SbxpcConnector {
   constructor(config) {
