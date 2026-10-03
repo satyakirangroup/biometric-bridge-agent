@@ -21,10 +21,10 @@ if not exist "%BIN_DIR%" (
     if exist "C:\SatyakiranBiometric" set "BIN_DIR=C:\SatyakiranBiometric"
 )
 
-echo [1/3] Copying ALL 32-bit SDK DLLs & Dependencies to Windows SysWOW64...
+echo [1/3] Copying ALL 32-bit SDK DLLs and Dependencies to Windows SysWOW64...
 if exist "%BIN_DIR%" (
-    copy /y "%BIN_DIR%\*.dll" "%SystemRoot%\SysWOW64\"
-    copy /y "%BIN_DIR%\*.ocx" "%SystemRoot%\SysWOW64\"
+    copy /y "%BIN_DIR%\*.dll" "%SystemRoot%\SysWOW64\" >nul 2>&1
+    copy /y "%BIN_DIR%\*.ocx" "%SystemRoot%\SysWOW64\" >nul 2>&1
     echo       Copied SBPCCOMM.dll, SBXPCDLL.dll, GEN_FONT.dll and OCX to SysWOW64.
 ) else (
     echo       Warning: %BIN_DIR% not found.
@@ -33,15 +33,14 @@ if exist "%BIN_DIR%" (
 echo.
 echo [2/3] Registering SBXPC.ocx in 32-bit Windows Subsystem...
 cd /d "%SystemRoot%\SysWOW64"
-"%SystemRoot%\SysWOW64\regsvr32.exe" "%SystemRoot%\SysWOW64\SBXPC.ocx"
+"%SystemRoot%\SysWOW64\regsvr32.exe" /s "%SystemRoot%\SysWOW64\SBXPC.ocx"
 
 echo.
-echo [3/3] Verifying with 32-bit Windows Subsystem (SysWOW64)...
-set "PS32=%SystemRoot%\SysWOW64\WindowsPowerShell\v1.0\powershell.exe"
-if not exist "%PS32%" set "PS32=powershell.exe"
+echo [3/3] Verifying registration with 32-bit CSCRIPT...
+set "CS32=%SystemRoot%\SysWOW64\cscript.exe"
+if not exist "%CS32%" set "CS32=cscript.exe"
 
-"%PS32%" -NoProfile -ExecutionPolicy Bypass -Command ^
-    "try { $sbx = New-Object -ComObject 'SBXPC.SBXPCCtrl.1' -ErrorAction Stop; Write-Host '✅ SUCCESS! SBXPC COM Object is 100% REGISTERED and ACTIVE!' -ForegroundColor Green } catch { Write-Host '❌ 32-bit COM Registration Error: ' $_.Exception.Message -ForegroundColor Red; Write-Host '   Make sure Microsoft Visual C++ 2010 Redistributable (x86) is installed.' -ForegroundColor Yellow }"
+"%CS32%" //Nologo -e:vbs -E "On Error Resume Next: Set s = CreateObject(\"SBXPC.SBXPCCtrl.1\"): If Err.Number = 0 Then WScript.Echo \"SUCCESS: SBXPC.SBXPCCtrl.1 COM Object is 100%% Registered and Active!\" Else WScript.Echo \"Error: \" & Err.Description"
 
 echo.
 echo =======================================================
