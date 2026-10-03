@@ -23,18 +23,17 @@ if not exist "%BIN_DIR%" (
 
 echo [1/3] Copying ALL 32-bit SDK DLLs & Dependencies to Windows SysWOW64...
 if exist "%BIN_DIR%" (
-    copy /y "%BIN_DIR%\*.dll" "%SystemRoot%\SysWOW64\" >nul 2>&1
-    copy /y "%BIN_DIR%\*.ocx" "%SystemRoot%\SysWOW64\" >nul 2>&1
-    echo       Successfully copied dependencies from %BIN_DIR% to SysWOW64.
+    copy /y "%BIN_DIR%\*.dll" "%SystemRoot%\SysWOW64\"
+    copy /y "%BIN_DIR%\*.ocx" "%SystemRoot%\SysWOW64\"
+    echo       Copied SBPCCOMM.dll, SBXPCDLL.dll, GEN_FONT.dll and OCX to SysWOW64.
 ) else (
     echo       Warning: %BIN_DIR% not found.
 )
 
 echo.
 echo [2/3] Registering SBXPC.ocx in 32-bit Windows Subsystem...
-cd /d "%BIN_DIR%"
-"%SystemRoot%\SysWOW64\regsvr32.exe" /s "%BIN_DIR%\SBXPC.ocx"
-"%SystemRoot%\SysWOW64\regsvr32.exe" /s "%SystemRoot%\SysWOW64\SBXPC.ocx"
+cd /d "%SystemRoot%\SysWOW64"
+"%SystemRoot%\SysWOW64\regsvr32.exe" "%SystemRoot%\SysWOW64\SBXPC.ocx"
 
 echo.
 echo [3/3] Verifying with 32-bit Windows Subsystem (SysWOW64)...
