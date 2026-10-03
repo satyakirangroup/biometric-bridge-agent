@@ -9,7 +9,7 @@
   "cloud": {
     "apiUrl": "https://api.satyakiran.co.in/api/v1/hrms/attendance/biometric-push",
     "authToken": "satyakiran_biometric_2026",
-    "branchId": "0fe39d99-31fb-4753-aa6c-704499bdbba9",
+    "branchId": "b9476311-ca46-49a8-8c70-af0032dbee74",
     "syncIntervalSeconds": 30
   },
   "options": {

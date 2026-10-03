@@ -1,3 +1,4 @@
+const http = require("http");
 const fs = require("fs");
 const path = require("path");
 const StateManager = require("./state-manager");
@@ -137,7 +138,7 @@ async function syncCycle() {
     const newLogs = rawLogs.filter((log) => !stateManager.isAlreadySynced(log));
 
     if (newLogs.length === 0) {
-      log("INFO", `📡 Machine online (${connector.ip}:${connector.port}) | Total device records: ${rawLogs.length} | Synced: ${stateManager.state.totalSyncedCount} | Listening for new punches...`);
+      log("INFO", `📡 Machine online (${connector.ip}:${connector.port}) | Total device records: ${rawLogs.length} | Synced: ${stateManager.state.totalSyncedCount} | ⚡ 2-Way Active | Listening for punches & commands...`);
       return;
     }
 
@@ -173,6 +174,53 @@ async function syncCycle() {
   }
 }
 
+function startLocalHealthServer(port = 5006) {
+  const server = http.createServer((req, res) => {
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Content-Type", "application/json");
+
+    const parsedUrl = new URL(req.url, `http://${req.headers.host || "localhost"}`);
+    if (parsedUrl.pathname === "/" || parsedUrl.pathname === "/health" || parsedUrl.pathname === "/api/status") {
+      res.writeHead(200);
+      return res.end(JSON.stringify({
+        status: "RUNNING",
+        agent: "Satyakiran Biometric Bridge Agent",
+        version: "1.0.0",
+        twoWayActive: true,
+        machine: {
+          name: config.machine.deviceName,
+          ip: config.machine.ip,
+          port: config.machine.port,
+          number: config.machine.machineNumber
+        },
+        cloud: {
+          apiUrl: config.cloud.apiUrl,
+          branchId: config.cloud.branchId,
+          syncIntervalSeconds: config.cloud.syncIntervalSeconds
+        },
+        stats: {
+          totalSynced: stateManager.state.totalSyncedCount,
+          lastSyncAt: stateManager.state.lastSyncAt
+        },
+        timestamp: new Date().toISOString()
+      }, null, 2));
+    }
+
+    res.writeHead(404);
+    res.end(JSON.stringify({ error: "Not Found" }));
+  });
+
+  server.on("error", (err) => {
+    if (err.code !== "EADDRINUSE") {
+      log("WARN", `Local health API warning: ${err.message}`);
+    }
+  });
+
+  server.listen(port, "0.0.0.0", () => {
+    log("INFO", `🌐 Local Health API running on http://localhost:${port}/health`);
+  });
+}
+
 async function start() {
   console.log("\n=======================================================");
   console.log("🚀 Satyakiran Biometric Cloud Bridge Agent v1.0");
@@ -183,7 +231,10 @@ async function start() {
   console.log(`☁️  Cloud URL: ${config.cloud.apiUrl}`);
   console.log(`⏱️  Polling Interval: ${config.cloud.syncIntervalSeconds} seconds`);
   console.log(`💾 Previously Synced Records: ${stateManager.state.totalSyncedCount}`);
+  console.log(`⚡ 2-Way Remote Commands: ACTIVE (Polling Cloud -> Hardware)`);
   console.log("=======================================================\n");
+
+  startLocalHealthServer(5006);
 
   log("INFO", "Starting initial sync cycle (catching up offline punches)...");
   await syncCycle();

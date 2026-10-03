@@ -256,8 +256,8 @@ function startLocalApiServer() {
     }
 
     try {
-      // 1. Status Check
-      if (req.method === "GET" && (pathname === "/" || pathname === "/api/status")) {
+      // 1. Status & Health Check
+      if (req.method === "GET" && (pathname === "/" || pathname === "/api/status" || pathname === "/health")) {
         return sendJson(200, {
           bridge: "Satyakiran Biometric Two-Way Bridge Agent",
           version: "2.0.0",

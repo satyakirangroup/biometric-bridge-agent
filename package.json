@@ -6,6 +6,7 @@
   "type": "commonjs",
   "scripts": {
     "start": "node src/index.js",
+    "health": "node src/check-health.js",
     "two-way": "node src/two-way-sync.js",
     "test:two-way": "node src/test-two-way.js",
     "sync:all": "node src/sync-history.js",

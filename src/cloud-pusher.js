@@ -108,10 +108,12 @@ class CloudPusher {
       };
       if (this.authToken) headers["Authorization"] = `Bearer ${this.authToken}`;
 
+      const normalizedStatus = (status === "SUCCESS" || status === "COMPLETED") ? "COMPLETED" : "FAILED";
+
       await fetch(url, {
         method: "POST",
         headers,
-        body: JSON.stringify({ commandId, status, error: error || null })
+        body: JSON.stringify({ commandId, status: normalizedStatus, error: error || null })
       });
       return true;
     } catch (err) {
