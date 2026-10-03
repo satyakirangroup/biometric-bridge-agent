@@ -92,43 +92,88 @@ while ($KeepRunning) {
             # -------------------------------------------------------------
             # WAY 1: Read Punches from Machine -> Push to Cloud
             # -------------------------------------------------------------
-            $hasLogs = $sbx.ReadGeneralLogData($MachineNum)
+            $hasLogs = $false
+            try { $hasLogs = $sbx.ReadAllGLogData($MachineNum) } catch {}
+            if (-not $hasLogs) {
+                try { $hasLogs = $sbx.ReadGeneralLogData($MachineNum) } catch {}
+            }
             $newPunches = @()
+            $totalCount = 0
 
             if ($hasLogs) {
+                $tMach = 0
                 $enrollNo = 0
+                $eMach = 0
                 $verifyMode = 0
-                $inOutMode = 0
                 $year = 0; $month = 0; $day = 0; $hour = 0; $minute = 0; $second = 0
 
-                while ($sbx.GetGeneralLogData($MachineNum, [ref]$enrollNo, [ref]$verifyMode, [ref]$inOutMode, [ref]$year, [ref]$month, [ref]$day, [ref]$hour, [ref]$minute, [ref]$second)) {
-                    $monthStr = "{0:D2}" -f $month
-                    $dayStr = "{0:D2}" -f $day
-                    $hourStr = "{0:D2}" -f $hour
-                    $minStr = "{0:D2}" -f $minute
-                    $secStr = "{0:D2}" -f $second
-                    $dtStr = "$year-$monthStr-$dayStr $hourStr`:$minStr`:$secStr"
-                    $empCodeStr = $enrollNo.ToString()
+                # Try GetAllGLogData first (paired with ReadAllGLogData)
+                $hasRecord = $false
+                try {
+                    $hasRecord = $sbx.GetAllGLogData($MachineNum, [ref]$tMach, [ref]$enrollNo, [ref]$eMach, [ref]$verifyMode, [ref]$year, [ref]$month, [ref]$day, [ref]$hour, [ref]$minute, [ref]$second)
+                } catch {}
 
-                    $sig = Get-LogSignature $empCodeStr $dtStr
+                if ($hasRecord) {
+                    do {
+                        $totalCount++
+                        $monthStr = "{0:D2}" -f $month
+                        $dayStr = "{0:D2}" -f $day
+                        $hourStr = "{0:D2}" -f $hour
+                        $minStr = "{0:D2}" -f $minute
+                        $secStr = "{0:D2}" -f $second
+                        $dtStr = "$year-$monthStr-$dayStr $hourStr`:$minStr`:$secStr"
+                        $empCodeStr = $enrollNo.ToString()
 
-                    if (-not $State.syncedSignatures.ContainsKey($sig)) {
-                        $dir = "AUTO"
-                        if ($inOutMode -eq 1) { $dir = "IN" }
-                        elseif ($inOutMode -eq 2) { $dir = "OUT" }
+                        $sig = Get-LogSignature $empCodeStr $dtStr
 
-                        $vMode = "Face"
-                        if ($verifyMode -eq 1) { $vMode = "Fingerprint" }
-                        elseif ($verifyMode -eq 2) { $vMode = "Card" }
+                        if (-not $State.syncedSignatures.ContainsKey($sig)) {
+                            $dir = "AUTO"
+                            $vMode = "Face"
+                            if ($verifyMode -eq 1) { $vMode = "Fingerprint" }
+                            elseif ($verifyMode -eq 2) { $vMode = "Card" }
+                            elseif ($verifyMode -eq 15) { $vMode = "Face" }
 
-                        $newPunches += @{
-                            employeeCode = $empCodeStr
-                            logDateTime = $dtStr
-                            direction = $dir
-                            verificationMode = $vMode
-                            deviceSerial = $MachineIp
-                            deviceName = $DeviceName
-                            branchId = $BranchId
+                            $newPunches += @{
+                                employeeCode = $empCodeStr
+                                logDateTime = $dtStr
+                                direction = $dir
+                                verificationMode = $vMode
+                                deviceSerial = $MachineIp
+                                deviceName = $DeviceName
+                                branchId = $BranchId
+                            }
+                        }
+                    } while ($sbx.GetAllGLogData($MachineNum, [ref]$tMach, [ref]$enrollNo, [ref]$eMach, [ref]$verifyMode, [ref]$year, [ref]$month, [ref]$day, [ref]$hour, [ref]$minute, [ref]$second))
+                } else {
+                    # Fallback loop using GetGeneralLogData (exact 11 parameters)
+                    while ($sbx.GetGeneralLogData($MachineNum, [ref]$tMach, [ref]$enrollNo, [ref]$eMach, [ref]$verifyMode, [ref]$year, [ref]$month, [ref]$day, [ref]$hour, [ref]$minute, [ref]$second)) {
+                        $totalCount++
+                        $monthStr = "{0:D2}" -f $month
+                        $dayStr = "{0:D2}" -f $day
+                        $hourStr = "{0:D2}" -f $hour
+                        $minStr = "{0:D2}" -f $minute
+                        $secStr = "{0:D2}" -f $second
+                        $dtStr = "$year-$monthStr-$dayStr $hourStr`:$minStr`:$secStr"
+                        $empCodeStr = $enrollNo.ToString()
+
+                        $sig = Get-LogSignature $empCodeStr $dtStr
+
+                        if (-not $State.syncedSignatures.ContainsKey($sig)) {
+                            $dir = "AUTO"
+                            $vMode = "Face"
+                            if ($verifyMode -eq 1) { $vMode = "Fingerprint" }
+                            elseif ($verifyMode -eq 2) { $vMode = "Card" }
+                            elseif ($verifyMode -eq 15) { $vMode = "Face" }
+
+                            $newPunches += @{
+                                employeeCode = $empCodeStr
+                                logDateTime = $dtStr
+                                direction = $dir
+                                verificationMode = $vMode
+                                deviceSerial = $MachineIp
+                                deviceName = $DeviceName
+                                branchId = $BranchId
+                            }
                         }
                     }
                 }

@@ -90,15 +90,23 @@ If Not connected Then
     WScript.Quit 1
 End If
 
-hasLogs = sbx.ReadGeneralLogData(${this.machineNumber})
+' Read all logs from device memory into PC buffer (ReadAllGLogData ignores read marks)
+Dim hasLogs
+hasLogs = sbx.ReadAllGLogData(${this.machineNumber})
+If Not hasLogs Then
+    ' Fallback to ReadGeneralLogData if ReadAllGLogData returned false
+    hasLogs = sbx.ReadGeneralLogData(${this.machineNumber})
+End If
+
 Dim results
 results = ""
 
 If hasLogs Then
-    Dim enrollNo, verifyMode, inOutMode, y, m, d, h, mi, s
+    Dim tMach, enrollNo, eMach, verifyMode, y, m, d, h, mi, s
+    tMach = 0
     enrollNo = 0
+    eMach = 0
     verifyMode = 0
-    inOutMode = 0
     y = 0
     m = 0
     d = 0
@@ -106,32 +114,62 @@ If hasLogs Then
     mi = 0
     s = 0
 
-    Do While sbx.GetGeneralLogData(${this.machineNumber}, enrollNo, verifyMode, inOutMode, y, m, d, h, mi, s)
-        Dim dtStr, dir, vMode
-        dtStr = Right("0000" & y, 4) & "-" & Right("00" & m, 2) & "-" & Right("00" & d, 2) & " " & Right("00" & h, 2) & ":" & Right("00" & mi, 2) & ":" & Right("00" & s, 2)
-        
-        dir = "AUTO"
-        If inOutMode = 1 Then dir = "IN"
-        If inOutMode = 2 Then dir = "OUT"
+    ' Try GetAllGLogData first (paired with ReadAllGLogData)
+    Dim hasRecord
+    hasRecord = sbx.GetAllGLogData(${this.machineNumber}, tMach, enrollNo, eMach, verifyMode, y, m, d, h, mi, s)
+    
+    If hasRecord Then
+        Do
+            Dim dtStr, dir, vMode
+            dtStr = Right("0000" & y, 4) & "-" & Right("00" & m, 2) & "-" & Right("00" & d, 2) & " " & Right("00" & h, 2) & ":" & Right("00" & mi, 2) & ":" & Right("00" & s, 2)
+            
+            dir = "AUTO"
+            vMode = "Face"
+            If verifyMode = 1 Then vMode = "Fingerprint"
+            If verifyMode = 2 Then vMode = "Card"
+            If verifyMode = 15 Then vMode = "Face"
 
-        vMode = "Face"
-        If verifyMode = 1 Then vMode = "Fingerprint"
-        If verifyMode = 2 Then vMode = "Card"
+            Dim item
+            item = "{" & Chr(34) & "employeeCode" & Chr(34) & ":" & Chr(34) & enrollNo & Chr(34) & "," & _
+                   Chr(34) & "logDateTime" & Chr(34) & ":" & Chr(34) & dtStr & Chr(34) & "," & _
+                   Chr(34) & "direction" & Chr(34) & ":" & Chr(34) & dir & Chr(34) & "," & _
+                   Chr(34) & "verificationMode" & Chr(34) & ":" & Chr(34) & vMode & Chr(34) & "," & _
+                   Chr(34) & "deviceSerial" & Chr(34) & ":" & Chr(34) & "${this.ip}" & Chr(34) & "," & _
+                   Chr(34) & "deviceName" & Chr(34) & ":" & Chr(34) & "${this.deviceName}" & Chr(34) & "}"
 
-        Dim item
-        item = "{" & Chr(34) & "employeeCode" & Chr(34) & ":" & Chr(34) & enrollNo & Chr(34) & "," & _
-               Chr(34) & "logDateTime" & Chr(34) & ":" & Chr(34) & dtStr & Chr(34) & "," & _
-               Chr(34) & "direction" & Chr(34) & ":" & Chr(34) & dir & Chr(34) & "," & _
-               Chr(34) & "verificationMode" & Chr(34) & ":" & Chr(34) & vMode & Chr(34) & "," & _
-               Chr(34) & "deviceSerial" & Chr(34) & ":" & Chr(34) & "${this.ip}" & Chr(34) & "," & _
-               Chr(34) & "deviceName" & Chr(34) & ":" & Chr(34) & "${this.deviceName}" & Chr(34) & "}"
+            If results = "" Then
+                results = item
+            Else
+                results = results & "," & item
+            End If
+        Loop While sbx.GetAllGLogData(${this.machineNumber}, tMach, enrollNo, eMach, verifyMode, y, m, d, h, mi, s)
+    Else
+        ' Fallback loop using GetGeneralLogData (exact 11 parameters)
+        While sbx.GetGeneralLogData(${this.machineNumber}, tMach, enrollNo, eMach, verifyMode, y, m, d, h, mi, s)
+            Dim dtStr2, dir2, vMode2
+            dtStr2 = Right("0000" & y, 4) & "-" & Right("00" & m, 2) & "-" & Right("00" & d, 2) & " " & Right("00" & h, 2) & ":" & Right("00" & mi, 2) & ":" & Right("00" & s, 2)
+            
+            dir2 = "AUTO"
+            vMode2 = "Face"
+            If verifyMode = 1 Then vMode2 = "Fingerprint"
+            If verifyMode = 2 Then vMode2 = "Card"
+            If verifyMode = 15 Then vMode2 = "Face"
 
-        If results = "" Then
-            results = item
-        Else
-            results = results & "," & item
-        End If
-    Loop
+            Dim item2
+            item2 = "{" & Chr(34) & "employeeCode" & Chr(34) & ":" & Chr(34) & enrollNo & Chr(34) & "," & _
+                    Chr(34) & "logDateTime" & Chr(34) & ":" & Chr(34) & dtStr2 & Chr(34) & "," & _
+                    Chr(34) & "direction" & Chr(34) & ":" & Chr(34) & dir2 & Chr(34) & "," & _
+                    Chr(34) & "verificationMode" & Chr(34) & ":" & Chr(34) & vMode2 & Chr(34) & "," & _
+                    Chr(34) & "deviceSerial" & Chr(34) & ":" & Chr(34) & "${this.ip}" & Chr(34) & "," & _
+                    Chr(34) & "deviceName" & Chr(34) & ":" & Chr(34) & "${this.deviceName}" & Chr(34) & "}"
+
+            If results = "" Then
+                results = item2
+            Else
+                results = results & "," & item2
+            End If
+        Wend
+    End If
 End If
 
 On Error Resume Next
@@ -154,10 +192,17 @@ WScript.Echo "[" & results & "]"
       let stdout = "";
       let stderr = "";
 
+      const timeoutTimer = setTimeout(() => {
+        try { proc.kill(); } catch {}
+        try { fs.unlinkSync(tmpVbsPath); } catch {}
+        reject(new Error("Timeout reading biometric device (20s exceeded)"));
+      }, 20000);
+
       proc.stdout.on("data", (d) => (stdout += d.toString()));
       proc.stderr.on("data", (d) => (stderr += d.toString()));
 
       proc.on("close", (code) => {
+        clearTimeout(timeoutTimer);
         try { fs.unlinkSync(tmpVbsPath); } catch {}
 
         const out = stdout.trim();
@@ -165,7 +210,7 @@ WScript.Echo "[" & results & "]"
           return reject(new Error(out || stderr || `cscript exited with code ${code}`));
         }
 
-        if (!out || out === "") {
+        if (!out || out === "" || out === "[]") {
           return resolve([]);
         }
 
@@ -174,7 +219,7 @@ WScript.Echo "[" & results & "]"
           const list = Array.isArray(parsed) ? parsed : [parsed];
           resolve(list);
         } catch (e) {
-          resolve([]);
+          reject(new Error(`Failed to parse device output: ${out}`));
         }
       });
     });

@@ -45,9 +45,9 @@ async function viewRawLogs() {
   console.log(`💾 Raw JSON saved to : ${jsonPath}`);
   console.log(`📄 Raw CSV/Excel to  : ${csvPath}\n`);
 
-  console.log("--- 📋 Preview of Recent 20 Records ---");
+  console.log("--- 📋 Preview of Recent 25 Records ---");
   console.table(
-    rawLogs.slice(-20).map((l) => ({
+    rawLogs.slice(-25).map((l) => ({
       "Emp Code": l.employeeCode,
       "Punch Time": l.logDateTime,
       "Direction": l.direction,
@@ -55,6 +55,14 @@ async function viewRawLogs() {
     }))
   );
   console.log("=======================================================\n");
+
+  if (process.platform === "win32") {
+    try {
+      const { exec } = require("child_process");
+      exec(`start "" "${csvPath}"`);
+      console.log("📊 Opening raw punches file in Excel / Default Viewer...");
+    } catch {}
+  }
 }
 
 viewRawLogs().catch((err) => {

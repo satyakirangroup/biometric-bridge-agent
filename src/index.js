@@ -34,28 +34,34 @@ async function syncCycle() {
     const rawLogs = await connector.fetchLogs();
     
     if (!rawLogs || rawLogs.length === 0) {
-      // No logs or idle
+      log("INFO", `📡 Machine polled (${connector.ip}:${connector.port}) — 0 punch records in memory. Waiting for punches...`);
       isSyncing = false;
       return;
     }
 
-    // Auto-save raw logs snapshot to local files for offline verification
+    // Auto-save raw logs snapshot to local files for offline verification & Excel viewing
     try {
       const logsDir = path.resolve(__dirname, "../logs");
       if (!fs.existsSync(logsDir)) fs.mkdirSync(logsDir, { recursive: true });
       fs.writeFileSync(path.join(logsDir, "raw_machine_punches.json"), JSON.stringify(rawLogs, null, 2), "utf-8");
+
+      const csvRows = ["EmployeeCode,LogDateTime,Direction,VerificationMode,DeviceSerial,DeviceName"];
+      for (const log of rawLogs) {
+        csvRows.push(`${log.employeeCode},"${log.logDateTime}",${log.direction},${log.verificationMode},${log.deviceSerial},"${log.deviceName}"`);
+      }
+      fs.writeFileSync(path.join(logsDir, "raw_machine_punches.csv"), csvRows.join("\n"), "utf-8");
     } catch {}
 
     // 2. Filter out logs that were already synced
     const newLogs = rawLogs.filter((log) => !stateManager.isAlreadySynced(log));
 
     if (newLogs.length === 0) {
-      // All logs on device are already synced
+      log("INFO", `📡 Machine online (${connector.ip}:${connector.port}) | Total device records: ${rawLogs.length} | Synced: ${stateManager.state.totalSyncedCount} | Listening for new punches...`);
       isSyncing = false;
       return;
     }
 
-    log("INFO", `Detected ${newLogs.length} new punch record(s) on biometric device. Preparing push...`);
+    log("INFO", `🔥 Detected ${newLogs.length} new punch record(s) on biometric device! Preparing push...`);
 
     // 3. Batch push to Satyakiran AWS Cloud
     const maxBatch = config.options?.maxBatchSize || 100;
