@@ -26,13 +26,15 @@ If Err.Number <> 0 Then
     WScript.Echo "ERROR: Cannot create COM object SBXPC.SBXPCCtrl.1 (" & Err.Description & ")"
     WScript.Quit 1
 End If
-On Error Goto 0
+
+sbx.DotNET
 
 connected = sbx.ConnectTcpip(${machine.machineNumber}, "${machine.ip}", ${machine.port}, ${machine.password})
-If Not connected Then
-    WScript.Echo "ERROR: Cannot connect to biometric device at ${machine.ip}:${machine.port} (Device offline or busy)"
+If Err.Number <> 0 Or Not connected Then
+    WScript.Echo "ERROR: Cannot connect to biometric device at ${machine.ip}:${machine.port} (Error: " & Err.Description & ")"
     WScript.Quit 1
 End If
+On Error Goto 0
 
 ' 1. Device Clock
 Dim dY, dM, dD, dH, dMi, dS, dDow

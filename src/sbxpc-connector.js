@@ -81,7 +81,7 @@ If Err.Number <> 0 Then
     WScript.Quit 1
 End If
 
-On Error Goto 0
+sbx.DotNET
 
 connected = sbx.ConnectTcpip(${this.machineNumber}, "${this.ip}", ${this.port}, ${this.password})
 If Not connected Then
