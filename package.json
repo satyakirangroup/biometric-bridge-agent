@@ -11,7 +11,8 @@
     "test:two-way": "node src/test-two-way.js",
     "sync:all": "node src/sync-history.js",
     "sync:history": "node src/sync-history.js",
-    "cli": "node src/cli.js"
+    "cli": "node src/cli.js",
+    "manage": "node src/manage-device.js"
   },
   "dependencies": {},
   "engines": {
