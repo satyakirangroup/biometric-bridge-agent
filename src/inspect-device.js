@@ -112,14 +112,14 @@ sbx.CloseCommPort
 
 WScript.Echo "JSON_START"
 WScript.Echo "{"
-WScript.Echo "  ""deviceTime"": """ & devTimeStr & ""","
-WScript.Echo "  ""userCount"": " & userCount & ","
-WScript.Echo "  ""fpCount"": " & fpCount & ","
-WScript.Echo "  ""faceCount"": " & faceCount & ","
-WScript.Echo "  ""totalLogs"": " & totalLogs & ","
-WScript.Echo "  ""unreadLogs"": " & unreadLogs & ","
-WScript.Echo "  ""enrolledUsers"": [" & userList & "],"
-WScript.Echo "  ""punches"": [" & punchesJson & "]"
+WScript.Echo "  " & Chr(34) & "deviceTime" & Chr(34) & ": " & Chr(34) & devTimeStr & Chr(34) & ","
+WScript.Echo "  " & Chr(34) & "userCount" & Chr(34) & ": " & userCount & ","
+WScript.Echo "  " & Chr(34) & "fpCount" & Chr(34) & ": " & fpCount & ","
+WScript.Echo "  " & Chr(34) & "faceCount" & Chr(34) & ": " & faceCount & ","
+WScript.Echo "  " & Chr(34) & "totalLogs" & Chr(34) & ": " & totalLogs & ","
+WScript.Echo "  " & Chr(34) & "unreadLogs" & Chr(34) & ": " & unreadLogs & ","
+WScript.Echo "  " & Chr(34) & "enrolledUsers" & Chr(34) & ": [" & userList & "],"
+WScript.Echo "  " & Chr(34) & "punches" & Chr(34) & ": [" & punchesJson & "]"
 WScript.Echo "}"
 WScript.Echo "JSON_END"
 `;
@@ -140,6 +140,10 @@ WScript.Echo "JSON_END"
 
   proc.on("close", (code) => {
     try { fs.unlinkSync(tmpVbs); } catch {}
+
+    if (stderr && stderr.trim()) {
+      console.error("❌ Windows VBScript Error:", stderr.trim());
+    }
 
     const out = stdout.trim();
     if (code !== 0 || out.startsWith("ERROR:")) {
