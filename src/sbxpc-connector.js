@@ -6,11 +6,11 @@ const path = require("path");
 
 class SbxpcConnector {
   constructor(config) {
-    this.ip = config.ip || "192.168.1.224";
+    this.ip = config.ip || "192.168.1.14";
     this.port = Number(config.port || 5005);
     this.machineNumber = Number(config.machineNumber || 1);
     this.password = Number(config.password || 0);
-    this.deviceName = config.deviceName || "Biometric Device";
+    this.deviceName = config.deviceName || "Sonipat Plant Biometric Machine";
   }
 
   /**
@@ -51,14 +51,12 @@ class SbxpcConnector {
 
   /**
    * Reads attendance logs from the machine.
-   * On Windows with SBXPC registered, it invokes the native COM bridge via PowerShell.
-   * On non-Windows/dev, it checks TCP socket status.
+   * On Windows, it invokes the native 32-bit SBXPCDLL bridge via SysWOW64 PowerShell.
    */
   async fetchLogs() {
     if (os.platform() === "win32") {
-      return this._fetchLogsViaVbs();
+      return this._fetchLogsViaNativeBridge();
     } else {
-      // Diagnostic/TCP check for non-windows environments
       const tcp = await this.testTcpConnection(2000);
       if (!tcp.connected) {
         throw new Error(`Device unreachable at ${this.ip}:${this.port} (${tcp.message})`);
@@ -68,150 +66,49 @@ class SbxpcConnector {
   }
 
   /**
-   * Native 32-bit VBScript Automation for SBXPC.ocx / SBPCOMM.dll
-   * VBScript natively passes COM ByRef Variant pointers without RCW/marshaling exceptions.
+   * Native 32-bit SBXPCDLL Automation via SysWOW64 PowerShell.
+   * Directly interfaces with vendor C# wrapper and native SBXPCDLL.dll / SBPCCOMM.dll.
    */
-  async _fetchLogsViaVbs() {
+  async _fetchLogsViaNativeBridge() {
     return new Promise((resolve, reject) => {
-      const vbsCode = `
-On Error Resume Next
-Set sbx = CreateObject("SBXPC.SBXPCCtrl.1")
-If Err.Number <> 0 Then
-    WScript.Echo "ERROR: Cannot create COM object SBXPC.SBXPCCtrl.1 (" & Err.Description & ")"
-    WScript.Quit 1
-End If
-
-sbx.DotNET
-
-connected = sbx.ConnectTcpip(${this.machineNumber}, "${this.ip}", ${this.port}, ${this.password})
-If Not connected Then
-    WScript.Echo "ERROR: Cannot connect to biometric device at ${this.ip}:${this.port} (Device offline or busy)"
-    WScript.Quit 1
-End If
-
-' Disable device input during transactional log reading (Mandatory per SDK manual)
-sbx.EnableDevice ${this.machineNumber}, False
-
-' Read logs from device memory into PC buffer (ReadAllGLogData ignores read marks)
-Dim hasLogs
-hasLogs = sbx.ReadAllGLogData(${this.machineNumber})
-If Not hasLogs Then
-    ' Fallback to ReadGeneralLogData if ReadAllGLogData returned false
-    hasLogs = sbx.ReadGeneralLogData(${this.machineNumber})
-End If
-
-Dim results
-results = ""
-
-If hasLogs Then
-    Dim tMach, enrollNo, eMach, verifyMode, y, m, d, h, mi, s
-    tMach = CLng(0)
-    enrollNo = CLng(0)
-    eMach = CLng(0)
-    verifyMode = CLng(0)
-    y = CLng(0)
-    m = CLng(0)
-    d = CLng(0)
-    h = CLng(0)
-    mi = CLng(0)
-    s = CLng(0)
-
-    ' Try GetAllGLogData first (paired with ReadAllGLogData)
-    Dim hasRecord
-    hasRecord = sbx.GetAllGLogData(${this.machineNumber}, tMach, enrollNo, eMach, verifyMode, y, m, d, h, mi, s)
-    
-    If hasRecord Then
-        Do
-            Dim dtStr, dir, vMode
-            dtStr = Right("0000" & y, 4) & "-" & Right("00" & m, 2) & "-" & Right("00" & d, 2) & " " & Right("00" & h, 2) & ":" & Right("00" & mi, 2) & ":" & Right("00" & s, 2)
-            
-            dir = "AUTO"
-            vMode = "Face"
-            If verifyMode = 1 Then vMode = "Fingerprint"
-            If verifyMode = 2 Then vMode = "Card"
-            If verifyMode = 15 Then vMode = "Face"
-
-            Dim item
-            item = "{" & Chr(34) & "employeeCode" & Chr(34) & ":" & Chr(34) & enrollNo & Chr(34) & "," & _
-                   Chr(34) & "logDateTime" & Chr(34) & ":" & Chr(34) & dtStr & Chr(34) & "," & _
-                   Chr(34) & "direction" & Chr(34) & ":" & Chr(34) & dir & Chr(34) & "," & _
-                   Chr(34) & "verificationMode" & Chr(34) & ":" & Chr(34) & vMode & Chr(34) & "," & _
-                   Chr(34) & "deviceSerial" & Chr(34) & ":" & Chr(34) & "${this.ip}" & Chr(34) & "," & _
-                   Chr(34) & "deviceName" & Chr(34) & ":" & Chr(34) & "${this.deviceName}" & Chr(34) & "}"
-
-            If results = "" Then
-                results = item
-            Else
-                results = results & "," & item
-            End If
-        Loop While sbx.GetAllGLogData(${this.machineNumber}, tMach, enrollNo, eMach, verifyMode, y, m, d, h, mi, s)
-    Else
-        ' Fallback loop using GetGeneralLogData (exact 11 parameters)
-        While sbx.GetGeneralLogData(${this.machineNumber}, tMach, enrollNo, eMach, verifyMode, y, m, d, h, mi, s)
-            Dim dtStr2, dir2, vMode2
-            dtStr2 = Right("0000" & y, 4) & "-" & Right("00" & m, 2) & "-" & Right("00" & d, 2) & " " & Right("00" & h, 2) & ":" & Right("00" & mi, 2) & ":" & Right("00" & s, 2)
-            
-            dir2 = "AUTO"
-            vMode2 = "Face"
-            If verifyMode = 1 Then vMode2 = "Fingerprint"
-            If verifyMode = 2 Then vMode2 = "Card"
-            If verifyMode = 15 Then vMode2 = "Face"
-
-            Dim item2
-            item2 = "{" & Chr(34) & "employeeCode" & Chr(34) & ":" & Chr(34) & enrollNo & Chr(34) & "," & _
-                    Chr(34) & "logDateTime" & Chr(34) & ":" & Chr(34) & dtStr2 & Chr(34) & "," & _
-                    Chr(34) & "direction" & Chr(34) & ":" & Chr(34) & dir2 & Chr(34) & "," & _
-                    Chr(34) & "verificationMode" & Chr(34) & ":" & Chr(34) & vMode2 & Chr(34) & "," & _
-                    Chr(34) & "deviceSerial" & Chr(34) & ":" & Chr(34) & "${this.ip}" & Chr(34) & "," & _
-                    Chr(34) & "deviceName" & Chr(34) & ":" & Chr(34) & "${this.deviceName}" & Chr(34) & "}"
-
-            If results = "" Then
-                results = item2
-            Else
-                results = results & "," & item2
-            End If
-        Wend
-    End If
-End If
-
-' Re-enable device input
-On Error Resume Next
-sbx.EnableDevice ${this.machineNumber}, True
-sbx.Disconnect
-sbx.CloseCommPort
-On Error Goto 0
-
-WScript.Echo "[" & results & "]"
-`;
-
-      const tmpDir = os.tmpdir();
-      const tmpVbsPath = path.join(tmpDir, `sbxpc_fetch_${Date.now()}.vbs`);
-      fs.writeFileSync(tmpVbsPath, vbsCode, "utf-8");
-
       const sysRoot = process.env.SystemRoot || process.env.windir || "C:\\Windows";
-      const x86Cscript = path.join(sysRoot, "SysWOW64", "cscript.exe");
-      const cscriptExe = fs.existsSync(x86Cscript) ? x86Cscript : "cscript.exe";
+      const x86Ps = path.join(sysRoot, "SysWOW64", "WindowsPowerShell", "v1.0", "powershell.exe");
+      const psExe = fs.existsSync(x86Ps) ? x86Ps : "powershell.exe";
+      const bridgeScript = path.resolve(__dirname, "native/sbxpc-bridge.ps1");
 
-      const proc = spawn(cscriptExe, ["//Nologo", tmpVbsPath]);
+      const args = [
+        "-NoProfile",
+        "-ExecutionPolicy", "Bypass",
+        "-File", bridgeScript,
+        "fetch-logs",
+        String(this.machineNumber),
+        this.ip,
+        String(this.port),
+        String(this.password),
+        this.deviceName
+      ];
+
+      const proc = spawn(psExe, args);
       let stdout = "";
       let stderr = "";
 
       const timeoutTimer = setTimeout(() => {
         try { proc.kill(); } catch {}
-        try { fs.unlinkSync(tmpVbsPath); } catch {}
-        reject(new Error("Timeout reading biometric device (20s exceeded)"));
-      }, 20000);
+        reject(new Error("Timeout reading biometric device (60s exceeded)"));
+      }, 60000);
 
       proc.stdout.on("data", (d) => (stdout += d.toString()));
       proc.stderr.on("data", (d) => (stderr += d.toString()));
 
       proc.on("close", (code) => {
         clearTimeout(timeoutTimer);
-        try { fs.unlinkSync(tmpVbsPath); } catch {}
 
         const out = stdout.trim();
-        if (code !== 0 || out.startsWith("ERROR:")) {
-          return reject(new Error(out || stderr || `cscript exited with code ${code}`));
+        const err = stderr.trim();
+
+        if (code !== 0 || out.startsWith("ERROR:") || err.includes("ERROR:")) {
+          const errMsg = err || out || `Process exited with code ${code}`;
+          return reject(new Error(errMsg));
         }
 
         if (!out || out === "" || out === "[]") {
@@ -219,14 +116,208 @@ WScript.Echo "[" & results & "]"
         }
 
         try {
-          const parsed = JSON.parse(out);
+          // Find the JSON array boundary in stdout if any prefix exists
+          const jsonStart = out.indexOf("[");
+          const jsonEnd = out.lastIndexOf("]");
+          if (jsonStart === -1 || jsonEnd === -1) {
+            return resolve([]);
+          }
+          const cleanJson = out.substring(jsonStart, jsonEnd + 1);
+          const parsed = JSON.parse(cleanJson);
           const list = Array.isArray(parsed) ? parsed : [parsed];
           resolve(list);
         } catch (e) {
-          reject(new Error(`Failed to parse device output: ${out}`));
+          reject(new Error(`Failed to parse device output: ${e.message}\nOutput: ${out.substring(0, 200)}...`));
         }
       });
     });
+  }
+
+  /**
+   * Queries hardware device information and stored inventory.
+   */
+  async inspectMachine() {
+    return new Promise((resolve, reject) => {
+      const sysRoot = process.env.SystemRoot || process.env.windir || "C:\\Windows";
+      const x86Ps = path.join(sysRoot, "SysWOW64", "WindowsPowerShell", "v1.0", "powershell.exe");
+      const psExe = fs.existsSync(x86Ps) ? x86Ps : "powershell.exe";
+      const bridgeScript = path.resolve(__dirname, "native/sbxpc-bridge.ps1");
+
+      const args = [
+        "-NoProfile",
+        "-ExecutionPolicy", "Bypass",
+        "-File", bridgeScript,
+        "inspect",
+        String(this.machineNumber),
+        this.ip,
+        String(this.port),
+        String(this.password),
+        this.deviceName
+      ];
+
+      const proc = spawn(psExe, args);
+      let stdout = "";
+      let stderr = "";
+
+      const timeoutTimer = setTimeout(() => {
+        try { proc.kill(); } catch {}
+        reject(new Error("Timeout inspecting biometric device (60s exceeded)"));
+      }, 60000);
+
+      proc.stdout.on("data", (d) => (stdout += d.toString()));
+      proc.stderr.on("data", (d) => (stderr += d.toString()));
+
+      proc.on("close", (code) => {
+        clearTimeout(timeoutTimer);
+
+        const out = stdout.trim();
+        const err = stderr.trim();
+
+        if (code !== 0 || out.startsWith("ERROR:") || err.includes("ERROR:")) {
+          return reject(new Error(err || out || `Process exited with code ${code}`));
+        }
+
+        const startIdx = out.indexOf("JSON_START");
+        const endIdx = out.indexOf("JSON_END");
+
+        if (startIdx === -1 || endIdx === -1) {
+          return reject(new Error(`Invalid inspect output format: ${out.substring(0, 200)}`));
+        }
+
+        const jsonStr = out.substring(startIdx + 10, endIdx).trim();
+        try {
+          const data = JSON.parse(jsonStr);
+          resolve(data);
+        } catch (e) {
+          reject(new Error(`Failed to parse inspection JSON: ${e.message}`));
+        }
+      });
+    });
+  }
+
+  /**
+   * Helper to execute native PowerShell bridge actions.
+   */
+  async _runBridge(action, extraArgs = [], timeoutMs = 60000) {
+    return new Promise((resolve, reject) => {
+      const sysRoot = process.env.SystemRoot || process.env.windir || "C:\\Windows";
+      const x86Ps = path.join(sysRoot, "SysWOW64", "WindowsPowerShell", "v1.0", "powershell.exe");
+      const psExe = fs.existsSync(x86Ps) ? x86Ps : "powershell.exe";
+      const bridgeScript = path.resolve(__dirname, "native/sbxpc-bridge.ps1");
+
+      const args = [
+        "-NoProfile",
+        "-ExecutionPolicy", "Bypass",
+        "-File", bridgeScript,
+        action,
+        String(this.machineNumber),
+        this.ip,
+        String(this.port),
+        String(this.password),
+        this.deviceName,
+        ...extraArgs.map(String)
+      ];
+
+      const proc = spawn(psExe, args);
+      let stdout = "";
+      let stderr = "";
+
+      const timeoutTimer = setTimeout(() => {
+        try { proc.kill(); } catch {}
+        reject(new Error(`Timeout executing '${action}' on biometric device (${timeoutMs / 1000}s exceeded)`));
+      }, timeoutMs);
+
+      proc.stdout.on("data", (d) => (stdout += d.toString()));
+      proc.stderr.on("data", (d) => (stderr += d.toString()));
+
+      proc.on("close", (code) => {
+        clearTimeout(timeoutTimer);
+
+        const out = stdout.trim();
+        const err = stderr.trim();
+
+        if (code !== 0 || out.startsWith("ERROR:") || err.includes("ERROR:")) {
+          return reject(new Error(err || out || `Bridge process exited with code ${code}`));
+        }
+
+        try {
+          const parsed = JSON.parse(out);
+          resolve(parsed);
+        } catch {
+          resolve({ raw: out });
+        }
+      });
+    });
+  }
+
+  /**
+   * [CREATE / UPDATE] Sets user's name, privilege and enables user on device.
+   */
+  async setUser(enrollNumber, userName, privilege = 0, enabled = 1) {
+    if (!enrollNumber) throw new Error("Enroll number is required");
+    const safeName = String(userName || "").trim();
+    return this._runBridge("set-user", [Number(enrollNumber), safeName, Number(privilege || 0), enabled ? 1 : 0]);
+  }
+
+  /**
+   * [READ] Reads a single employee's details directly from device.
+   */
+  async getUser(enrollNumber) {
+    if (!enrollNumber) throw new Error("Enroll number is required");
+    return this._runBridge("get-user", [Number(enrollNumber)]);
+  }
+
+  /**
+   * [UPDATE] Updates an existing user's attributes.
+   */
+  async updateUser(enrollNumber, updates = {}) {
+    if (!enrollNumber) throw new Error("Enroll number is required");
+    const current = await this.getUser(enrollNumber).catch(() => ({}));
+    const name = updates.name !== undefined ? updates.name : (current.employeeName || "");
+    const priv = updates.privilege !== undefined ? updates.privilege : (current.privilege || 0);
+    const enabled = updates.enabled !== undefined ? (updates.enabled ? 1 : 0) : 1;
+    return this.setUser(enrollNumber, name, priv, enabled);
+  }
+
+  /**
+   * [DELETE] Deletes a user and their biometric/card/password data from physical device.
+   */
+  async deleteUser(enrollNumber) {
+    if (!enrollNumber) throw new Error("Enroll number is required");
+    return this._runBridge("delete-user", [Number(enrollNumber)]);
+  }
+
+  /**
+   * Toggles enable/disable state for an employee on hardware.
+   */
+  async enableUser(enrollNumber, flag = 1) {
+    if (!enrollNumber) throw new Error("Enroll number is required");
+    const current = await this.getUser(enrollNumber).catch(() => ({}));
+    const name = current.employeeName || "";
+    const priv = current.privilege || 0;
+    return this.setUser(enrollNumber, name, priv, flag ? 1 : 0);
+  }
+
+  /**
+   * Synchronizes hardware clock with local PC system time.
+   */
+  async syncTime() {
+    return this._runBridge("sync-time");
+  }
+
+  /**
+   * [READ ALL] Reads all enrolled users and their names directly from hardware memory.
+   */
+  async getUsers() {
+    const res = await this._runBridge("get-users", [], 90000);
+    return Array.isArray(res) ? res : [];
+  }
+
+  /**
+   * Empties attendance logs stored on the machine.
+   */
+  async clearLogs() {
+    return this._runBridge("clear-logs");
   }
 }
 

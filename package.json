@@ -6,10 +6,11 @@
   "type": "commonjs",
   "scripts": {
     "start": "node src/index.js",
+    "two-way": "node src/two-way-sync.js",
+    "test:two-way": "node src/test-two-way.js",
     "sync:all": "node src/sync-history.js",
     "sync:history": "node src/sync-history.js",
-    "test-connection": "node src/test-connection.js",
-    "view:raw": "node src/view-raw-logs.js"
+    "cli": "node src/cli.js"
   },
   "dependencies": {},
   "engines": {

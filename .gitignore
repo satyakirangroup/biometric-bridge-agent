@@ -1,0 +1,8 @@
+node_modules/
+logs/
+*.log
+bin/
+test_*.vbs
+test_*.cs
+test_*.exe
+test_*.ps1

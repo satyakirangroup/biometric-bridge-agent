@@ -2,6 +2,7 @@ const fs = require("fs");
 const path = require("path");
 const SbxpcConnector = require("./sbxpc-connector");
 const CloudPusher = require("./cloud-pusher");
+const StateManager = require("./state-manager");
 
 async function syncAllHistoricalData() {
   console.log("\n=======================================================");
@@ -18,6 +19,7 @@ async function syncAllHistoricalData() {
   const config = JSON.parse(fs.readFileSync(configPath, "utf-8"));
   const connector = new SbxpcConnector(config.machine);
   const pusher = new CloudPusher(config.cloud);
+  const stateManager = new StateManager(config.options?.syncStateFile || "./sync-state.json");
 
   console.log(`📟 Machine Target: ${config.machine.ip}:${config.machine.port}`);
   console.log(`☁️  Cloud Endpoint: ${config.cloud.apiUrl}`);
@@ -32,6 +34,19 @@ async function syncAllHistoricalData() {
   }
 
   console.log(`✅ Successfully extracted ${rawLogs.length} punch record(s) from device!`);
+
+  // Auto-save raw logs snapshot to local files for offline verification & Excel viewing
+  try {
+    const logsDir = path.resolve(__dirname, "../logs");
+    if (!fs.existsSync(logsDir)) fs.mkdirSync(logsDir, { recursive: true });
+    fs.writeFileSync(path.join(logsDir, "raw_machine_punches.json"), JSON.stringify(rawLogs, null, 2), "utf-8");
+
+    const csvRows = ["EmployeeCode,EmployeeName,LogDateTime,Direction,VerificationMode,DeviceSerial,DeviceName"];
+    for (const log of rawLogs) {
+      csvRows.push(`${log.employeeCode},"${log.employeeName || ""}",${log.logDateTime},${log.direction},${log.verificationMode},${log.deviceSerial},"${log.deviceName}"`);
+    }
+    fs.writeFileSync(path.join(logsDir, "raw_machine_punches.csv"), csvRows.join("\n"), "utf-8");
+  } catch {}
 
   // Sort logs chronologically (oldest first to newest)
   rawLogs.sort((a, b) => new Date(a.logDateTime).getTime() - new Date(b.logDateTime).getTime());
@@ -54,6 +69,7 @@ async function syncAllHistoricalData() {
 
     const res = await pusher.pushPunches(batch);
     if (res.success) {
+      stateManager.markSynced(batch);
       successCount += batch.length;
       console.log("✅ OK");
     } else {

@@ -25,17 +25,98 @@ function log(level, message) {
   console.log(`[${ts}] ${icon} ${message}`);
 }
 
+async function processPendingCommands() {
+  try {
+    const commands = await pusher.fetchPendingCommands();
+    if (!commands || commands.length === 0) return;
+
+    log("INFO", `📩 Received ${commands.length} pending hardware command(s) from Satyakiran Cloud!`);
+
+    for (const cmd of commands) {
+      const cmdId = cmd.id || cmd.commandId;
+      const action = (cmd.action || cmd.command || cmd.type || "").toUpperCase();
+      const payload = cmd.data || cmd.payload || cmd;
+
+      log("INFO", `⚙️  Executing Command [${cmdId}]: ${action}...`);
+
+      try {
+        if (action === "SET_USER" || action === "CREATE_USER") {
+          const empCode = payload.employeeCode || payload.enrollNumber || payload.UserId || payload.tatempcode;
+          const empName = payload.employeeName || payload.name || payload.UserName || "";
+          const priv = Number(payload.privilege || 0);
+          const enabled = payload.enabled !== false;
+          if (!empCode) throw new Error("Missing employeeCode in command data");
+
+          await connector.setUser(empCode, empName, priv, enabled);
+          log("SUCCESS", `✅ [CRUD CREATE] Created Employee #${empCode} (${empName || "No name"}) on Biometric Machine!`);
+          await pusher.acknowledgeCommand(cmdId, "SUCCESS");
+
+        } else if (action === "UPDATE_USER") {
+          const empCode = payload.employeeCode || payload.enrollNumber || payload.UserId || payload.tatempcode;
+          if (!empCode) throw new Error("Missing employeeCode in command data");
+
+          await connector.updateUser(empCode, {
+            name: payload.employeeName || payload.name,
+            privilege: payload.privilege,
+            enabled: payload.enabled
+          });
+          log("SUCCESS", `✅ [CRUD UPDATE] Updated Employee #${empCode} on Biometric Machine!`);
+          await pusher.acknowledgeCommand(cmdId, "SUCCESS");
+
+        } else if (action === "DELETE_USER" || action === "REMOVE_USER") {
+          const empCode = payload.employeeCode || payload.enrollNumber || payload.UserId;
+          if (!empCode) throw new Error("Missing employeeCode in command data");
+
+          await connector.deleteUser(empCode);
+          log("SUCCESS", `✅ [CRUD DELETE] Deleted Employee #${empCode} from Biometric Machine!`);
+          await pusher.acknowledgeCommand(cmdId, "SUCCESS");
+
+        } else if (action === "ENABLE_USER" || action === "DISABLE_USER") {
+          const empCode = payload.employeeCode || payload.enrollNumber || payload.UserId;
+          if (!empCode) throw new Error("Missing employeeCode in command data");
+          const flag = action === "ENABLE_USER" ? 1 : 0;
+
+          await connector.enableUser(empCode, flag);
+          log("SUCCESS", `✅ [CRUD TOGGLE] ${flag ? "Enabled" : "Disabled"} Employee #${empCode} on Biometric Machine!`);
+          await pusher.acknowledgeCommand(cmdId, "SUCCESS");
+
+        } else if (action === "SYNC_TIME") {
+          await connector.syncTime();
+          log("SUCCESS", `✅ Synchronized Biometric Machine clock with Server Time!`);
+          await pusher.acknowledgeCommand(cmdId, "SUCCESS");
+
+        } else if (action === "CLEAR_LOGS") {
+          await connector.clearLogs();
+          log("SUCCESS", `✅ Cleared device punch logs per Cloud command!`);
+          await pusher.acknowledgeCommand(cmdId, "SUCCESS");
+
+        } else {
+          log("WARN", `⚠️ Unknown command action '${action}'. Skipping.`);
+          await pusher.acknowledgeCommand(cmdId, "FAILED", `Unknown command action: ${action}`);
+        }
+      } catch (err) {
+        log("ERROR", `❌ Failed executing command [${cmdId}]: ${err.message}`);
+        await pusher.acknowledgeCommand(cmdId, "FAILED", err.message);
+      }
+    }
+  } catch (err) {
+    // Suppress minor polling errors
+  }
+}
+
 async function syncCycle() {
   if (isSyncing) return;
   isSyncing = true;
 
   try {
-    // 1. Fetch raw logs from machine via SDK
+    // 1. Process 2-way remote commands from cloud (Create user, delete user, clock sync, etc.)
+    await processPendingCommands();
+
+    // 2. Fetch raw logs from machine via SDK
     const rawLogs = await connector.fetchLogs();
     
     if (!rawLogs || rawLogs.length === 0) {
       log("INFO", `📡 Machine polled (${connector.ip}:${connector.port}) — 0 punch records in memory. Waiting for punches...`);
-      isSyncing = false;
       return;
     }
 
@@ -45,25 +126,24 @@ async function syncCycle() {
       if (!fs.existsSync(logsDir)) fs.mkdirSync(logsDir, { recursive: true });
       fs.writeFileSync(path.join(logsDir, "raw_machine_punches.json"), JSON.stringify(rawLogs, null, 2), "utf-8");
 
-      const csvRows = ["EmployeeCode,LogDateTime,Direction,VerificationMode,DeviceSerial,DeviceName"];
+      const csvRows = ["EmployeeCode,EmployeeName,LogDateTime,Direction,VerificationMode,DeviceSerial,DeviceName"];
       for (const log of rawLogs) {
-        csvRows.push(`${log.employeeCode},"${log.logDateTime}",${log.direction},${log.verificationMode},${log.deviceSerial},"${log.deviceName}"`);
+        csvRows.push(`${log.employeeCode},"${log.employeeName || ""}",${log.logDateTime},${log.direction},${log.verificationMode},${log.deviceSerial},"${log.deviceName}"`);
       }
       fs.writeFileSync(path.join(logsDir, "raw_machine_punches.csv"), csvRows.join("\n"), "utf-8");
     } catch {}
 
-    // 2. Filter out logs that were already synced
+    // 3. Filter out logs that were already synced
     const newLogs = rawLogs.filter((log) => !stateManager.isAlreadySynced(log));
 
     if (newLogs.length === 0) {
       log("INFO", `📡 Machine online (${connector.ip}:${connector.port}) | Total device records: ${rawLogs.length} | Synced: ${stateManager.state.totalSyncedCount} | Listening for new punches...`);
-      isSyncing = false;
       return;
     }
 
     log("INFO", `🔥 Detected ${newLogs.length} new punch record(s) on biometric device! Preparing push...`);
 
-    // 3. Batch push to Satyakiran AWS Cloud
+    // 4. Batch push to Satyakiran AWS Cloud
     const maxBatch = config.options?.maxBatchSize || 100;
     for (let i = 0; i < newLogs.length; i += maxBatch) {
       const batch = newLogs.slice(i, i + maxBatch);
@@ -75,7 +155,8 @@ async function syncCycle() {
         
         // Print preview of first 3 punches
         for (const p of batch.slice(0, 3)) {
-          console.log(`      👤 EmpCode: ${p.employeeCode} | Time: ${p.logDateTime} | Mode: ${p.verificationMode}`);
+          const empDisplay = p.employeeName ? `${p.employeeName} (#${p.employeeCode})` : `#${p.employeeCode}`;
+          console.log(`      👤 Emp: ${empDisplay} | Time: ${p.logDateTime} | Mode: ${p.verificationMode}`);
         }
         if (batch.length > 3) {
           console.log(`      ... and ${batch.length - 3} more records`);
