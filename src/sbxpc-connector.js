@@ -82,7 +82,6 @@ If Err.Number <> 0 Then
 End If
 
 On Error Goto 0
-sbx.DotNET
 
 connected = sbx.ConnectTcpip(${this.machineNumber}, "${this.ip}", ${this.port}, ${this.password})
 If Not connected Then
@@ -90,7 +89,10 @@ If Not connected Then
     WScript.Quit 1
 End If
 
-' Read all logs from device memory into PC buffer (ReadAllGLogData ignores read marks)
+' Disable device input during transactional log reading (Mandatory per SDK manual)
+sbx.EnableDevice ${this.machineNumber}, False
+
+' Read logs from device memory into PC buffer (ReadAllGLogData ignores read marks)
 Dim hasLogs
 hasLogs = sbx.ReadAllGLogData(${this.machineNumber})
 If Not hasLogs Then
@@ -103,16 +105,16 @@ results = ""
 
 If hasLogs Then
     Dim tMach, enrollNo, eMach, verifyMode, y, m, d, h, mi, s
-    tMach = 0
-    enrollNo = 0
-    eMach = 0
-    verifyMode = 0
-    y = 0
-    m = 0
-    d = 0
-    h = 0
-    mi = 0
-    s = 0
+    tMach = CLng(0)
+    enrollNo = CLng(0)
+    eMach = CLng(0)
+    verifyMode = CLng(0)
+    y = CLng(0)
+    m = CLng(0)
+    d = CLng(0)
+    h = CLng(0)
+    mi = CLng(0)
+    s = CLng(0)
 
     ' Try GetAllGLogData first (paired with ReadAllGLogData)
     Dim hasRecord
@@ -172,7 +174,9 @@ If hasLogs Then
     End If
 End If
 
+' Re-enable device input
 On Error Resume Next
+sbx.EnableDevice ${this.machineNumber}, True
 sbx.Disconnect
 sbx.CloseCommPort
 On Error Goto 0
