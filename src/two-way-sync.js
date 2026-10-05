@@ -48,6 +48,24 @@ function log(channel, message) {
   console.log(`[${ts()}] ${badge} ${message}`);
 }
 
+function getEnrollCode(payload) {
+  if (!payload || typeof payload !== "object") return null;
+  const candidates = [payload.enrollNumber, payload.punchId, payload.employeeCode, payload.UserId, payload.tatempcode];
+  for (const c of candidates) {
+    if (c === undefined || c === null) continue;
+    const s = String(c).trim();
+    if (s === "" || s.toLowerCase() === "nan" || s.toLowerCase() === "null" || s.toLowerCase() === "undefined") continue;
+    if (/\d/.test(s)) return c;
+  }
+  for (const c of candidates) {
+    if (c === undefined || c === null) continue;
+    const s = String(c).trim();
+    if (s === "" || s.toLowerCase() === "nan" || s.toLowerCase() === "null" || s.toLowerCase() === "undefined") continue;
+    return c;
+  }
+  return null;
+}
+
 // -------------------------------------------------------------
 // Direction 2: Process Cloud Commands (AWS -> Biometric Device)
 // -------------------------------------------------------------
@@ -69,11 +87,11 @@ async function processCloudCommands() {
 
       try {
         if (action === "SET_USER" || action === "CREATE_USER") {
-          const empCode = payload.enrollNumber || payload.punchId || payload.employeeCode || payload.UserId || payload.tatempcode;
+          const empCode = getEnrollCode(payload);
           const empName = payload.employeeName || payload.fullName || payload.name || payload.UserName || "";
           const priv = Number(payload.privilege || 0);
           const enabled = payload.enabled !== false;
-          if (!empCode) throw new Error("Missing employee identifier (enrollNumber/employeeCode) in command data");
+          if (!empCode) throw new Error("Missing valid employee identifier (enrollNumber/punchId/employeeCode) in command data");
 
           await connector.setUser(empCode, empName, priv, enabled);
           log("SUCCESS", `[CRUD CREATE] Employee #${empCode} (${empName || "No name"}) created on biometric hardware!`);
@@ -81,8 +99,8 @@ async function processCloudCommands() {
           totalCommandsExecuted++;
 
         } else if (action === "UPDATE_USER") {
-          const empCode = payload.enrollNumber || payload.punchId || payload.employeeCode || payload.UserId || payload.tatempcode;
-          if (!empCode) throw new Error("Missing employee identifier in command data");
+          const empCode = getEnrollCode(payload);
+          if (!empCode) throw new Error("Missing valid employee identifier in command data");
 
           await connector.updateUser(empCode, {
             name: payload.employeeName || payload.fullName || payload.name,
@@ -94,8 +112,8 @@ async function processCloudCommands() {
           totalCommandsExecuted++;
 
         } else if (action === "DELETE_USER" || action === "REMOVE_USER") {
-          const empCode = payload.enrollNumber || payload.punchId || payload.employeeCode || payload.UserId;
-          if (!empCode) throw new Error("Missing employee identifier in command data");
+          const empCode = getEnrollCode(payload);
+          if (!empCode) throw new Error("Missing valid employee identifier in command data");
 
           await connector.deleteUser(empCode);
           log("SUCCESS", `[CRUD DELETE] Employee #${empCode} deleted from biometric hardware!`);
@@ -103,8 +121,8 @@ async function processCloudCommands() {
           totalCommandsExecuted++;
 
         } else if (action === "ENABLE_USER" || action === "DISABLE_USER") {
-          const empCode = payload.enrollNumber || payload.punchId || payload.employeeCode || payload.UserId;
-          if (!empCode) throw new Error("Missing employee identifier in command data");
+          const empCode = getEnrollCode(payload);
+          if (!empCode) throw new Error("Missing valid employee identifier in command data");
           const flag = action === "ENABLE_USER" ? 1 : 0;
 
           await connector.enableUser(empCode, flag);

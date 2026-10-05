@@ -26,6 +26,24 @@ function log(level, message) {
   console.log(`[${ts}] ${icon} ${message}`);
 }
 
+function getEnrollCode(payload) {
+  if (!payload || typeof payload !== "object") return null;
+  const candidates = [payload.enrollNumber, payload.punchId, payload.employeeCode, payload.UserId, payload.tatempcode];
+  for (const c of candidates) {
+    if (c === undefined || c === null) continue;
+    const s = String(c).trim();
+    if (s === "" || s.toLowerCase() === "nan" || s.toLowerCase() === "null" || s.toLowerCase() === "undefined") continue;
+    if (/\d/.test(s)) return c;
+  }
+  for (const c of candidates) {
+    if (c === undefined || c === null) continue;
+    const s = String(c).trim();
+    if (s === "" || s.toLowerCase() === "nan" || s.toLowerCase() === "null" || s.toLowerCase() === "undefined") continue;
+    return c;
+  }
+  return null;
+}
+
 async function processPendingCommands() {
   try {
     const commands = await pusher.fetchPendingCommands();
@@ -42,19 +60,19 @@ async function processPendingCommands() {
 
       try {
         if (action === "SET_USER" || action === "CREATE_USER") {
-          const empCode = payload.enrollNumber || payload.punchId || payload.employeeCode || payload.UserId || payload.tatempcode;
+          const empCode = getEnrollCode(payload);
           const empName = payload.employeeName || payload.fullName || payload.name || payload.UserName || "";
           const priv = Number(payload.privilege || 0);
           const enabled = payload.enabled !== false;
-          if (!empCode) throw new Error("Missing employee identifier (enrollNumber/employeeCode) in command data");
+          if (!empCode) throw new Error("Missing valid employee identifier (enrollNumber/punchId/employeeCode) in command data");
 
           await connector.setUser(empCode, empName, priv, enabled);
           log("SUCCESS", `✅ [CRUD CREATE] Created Employee #${empCode} (${empName || "No name"}) on Biometric Machine!`);
           await pusher.acknowledgeCommand(cmdId, "SUCCESS");
 
         } else if (action === "UPDATE_USER") {
-          const empCode = payload.enrollNumber || payload.punchId || payload.employeeCode || payload.UserId || payload.tatempcode;
-          if (!empCode) throw new Error("Missing employee identifier in command data");
+          const empCode = getEnrollCode(payload);
+          if (!empCode) throw new Error("Missing valid employee identifier in command data");
 
           await connector.updateUser(empCode, {
             name: payload.employeeName || payload.fullName || payload.name,
@@ -65,16 +83,16 @@ async function processPendingCommands() {
           await pusher.acknowledgeCommand(cmdId, "SUCCESS");
 
         } else if (action === "DELETE_USER" || action === "REMOVE_USER") {
-          const empCode = payload.enrollNumber || payload.punchId || payload.employeeCode || payload.UserId;
-          if (!empCode) throw new Error("Missing employee identifier in command data");
+          const empCode = getEnrollCode(payload);
+          if (!empCode) throw new Error("Missing valid employee identifier in command data");
 
           await connector.deleteUser(empCode);
           log("SUCCESS", `✅ [CRUD DELETE] Deleted Employee #${empCode} from Biometric Machine!`);
           await pusher.acknowledgeCommand(cmdId, "SUCCESS");
 
         } else if (action === "ENABLE_USER" || action === "DISABLE_USER") {
-          const empCode = payload.enrollNumber || payload.punchId || payload.employeeCode || payload.UserId;
-          if (!empCode) throw new Error("Missing employee identifier in command data");
+          const empCode = getEnrollCode(payload);
+          if (!empCode) throw new Error("Missing valid employee identifier in command data");
           const flag = action === "ENABLE_USER" ? 1 : 0;
 
           await connector.enableUser(empCode, flag);
