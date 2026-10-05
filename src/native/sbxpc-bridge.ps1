@@ -18,7 +18,7 @@ param (
     [string]$DeviceName = "Biometric Device",
 
     [Parameter(Position=6)]
-    [int]$TargetEnrollNumber = 0,
+    [string]$TargetEnrollNumber = "0",
 
     [Parameter(Position=7)]
     [string]$TargetUserName = "",
@@ -31,6 +31,18 @@ param (
 )
 
 $ErrorActionPreference = "Stop"
+
+# Sanitize TargetEnrollNumber so values like "EMP-0001", "EMP-00000043", "NaN" never crash parameter binding
+$rawEnrollStr = [string]$TargetEnrollNumber
+$cleanEnroll = ($rawEnrollStr -replace '\D', '')
+$targetEnrollInt = 0
+if (-not [int]::TryParse($cleanEnroll, [ref]$targetEnrollInt) -or $targetEnrollInt -le 0) {
+    if (-not [int]::TryParse($rawEnrollStr, [ref]$targetEnrollInt)) {
+        $targetEnrollInt = 0
+    }
+}
+$TargetEnrollNumber = $targetEnrollInt
+
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $BaseDir = Split-Path -Parent (Split-Path -Parent $ScriptDir)
 $DllPath = Join-Path $BaseDir "SBXPCDLL_Net.dll"

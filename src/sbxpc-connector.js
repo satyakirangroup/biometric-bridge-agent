@@ -251,51 +251,75 @@ class SbxpcConnector {
   }
 
   /**
+   * Normalizes an enroll number or employee code (e.g. "EMP-0001", "EMP-00000043", "43", 1)
+   * into a positive integer required by biometric device firmware.
+   */
+  _normalizeEnrollNumber(val) {
+    if (val === undefined || val === null) {
+      throw new Error("Enroll number is required");
+    }
+    if (typeof val === "number" && !isNaN(val) && val > 0) {
+      return Math.floor(val);
+    }
+    const str = String(val).trim();
+    if (/^\d+$/.test(str)) {
+      const num = parseInt(str, 10);
+      if (!isNaN(num) && num > 0) return num;
+    }
+    const digits = str.replace(/\D/g, "");
+    if (digits.length > 0) {
+      const num = parseInt(digits, 10);
+      if (!isNaN(num) && num > 0) return num;
+    }
+    throw new Error(`Cannot parse valid numeric biometric EnrollNumber from '${val}'`);
+  }
+
+  /**
    * [CREATE / UPDATE] Sets user's name, privilege and enables user on device.
    */
   async setUser(enrollNumber, userName, privilege = 0, enabled = 1) {
-    if (!enrollNumber) throw new Error("Enroll number is required");
+    const num = this._normalizeEnrollNumber(enrollNumber);
     const safeName = String(userName || "").trim();
-    return this._runBridge("set-user", [Number(enrollNumber), safeName, Number(privilege || 0), enabled ? 1 : 0]);
+    return this._runBridge("set-user", [num, safeName, Number(privilege || 0), enabled ? 1 : 0]);
   }
 
   /**
    * [READ] Reads a single employee's details directly from device.
    */
   async getUser(enrollNumber) {
-    if (!enrollNumber) throw new Error("Enroll number is required");
-    return this._runBridge("get-user", [Number(enrollNumber)]);
+    const num = this._normalizeEnrollNumber(enrollNumber);
+    return this._runBridge("get-user", [num]);
   }
 
   /**
    * [UPDATE] Updates an existing user's attributes.
    */
   async updateUser(enrollNumber, updates = {}) {
-    if (!enrollNumber) throw new Error("Enroll number is required");
-    const current = await this.getUser(enrollNumber).catch(() => ({}));
+    const num = this._normalizeEnrollNumber(enrollNumber);
+    const current = await this.getUser(num).catch(() => ({}));
     const name = updates.name !== undefined ? updates.name : (current.employeeName || "");
     const priv = updates.privilege !== undefined ? updates.privilege : (current.privilege || 0);
     const enabled = updates.enabled !== undefined ? (updates.enabled ? 1 : 0) : 1;
-    return this.setUser(enrollNumber, name, priv, enabled);
+    return this.setUser(num, name, priv, enabled);
   }
 
   /**
    * [DELETE] Deletes a user and their biometric/card/password data from physical device.
    */
   async deleteUser(enrollNumber) {
-    if (!enrollNumber) throw new Error("Enroll number is required");
-    return this._runBridge("delete-user", [Number(enrollNumber)]);
+    const num = this._normalizeEnrollNumber(enrollNumber);
+    return this._runBridge("delete-user", [num]);
   }
 
   /**
-   * Toggles enable/disable state for an employee on hardware.
+   * [TOGGLE] Toggles enable/disable state for an employee on hardware.
    */
   async enableUser(enrollNumber, flag = 1) {
-    if (!enrollNumber) throw new Error("Enroll number is required");
-    const current = await this.getUser(enrollNumber).catch(() => ({}));
+    const num = this._normalizeEnrollNumber(enrollNumber);
+    const current = await this.getUser(num).catch(() => ({}));
     const name = current.employeeName || "";
     const priv = current.privilege || 0;
-    return this.setUser(enrollNumber, name, priv, flag ? 1 : 0);
+    return this.setUser(num, name, priv, flag ? 1 : 0);
   }
 
   /**

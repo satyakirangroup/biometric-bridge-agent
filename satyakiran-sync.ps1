@@ -238,11 +238,13 @@ while ($KeepRunning) {
 
                     try {
                         if ($action -eq "SET_USER") {
+                            $rawCode = if ($payload.enrollNumber) { [string]$payload.enrollNumber } elseif ($payload.punchId) { [string]$payload.punchId } else { [string]$payload.employeeCode }
+                            $cleanCode = ($rawCode -replace '\D', '')
                             $codeInt = 0
-                            [int]::TryParse($payload.employeeCode, [ref]$codeInt) | Out-Null
-                            if ($codeInt -le 0) { $codeInt = [Math]::Abs($payload.employeeId.GetHashCode() % 99999) }
+                            [int]::TryParse($cleanCode, [ref]$codeInt) | Out-Null
+                            if ($codeInt -le 0 -and $payload.employeeId) { $codeInt = [Math]::Abs($payload.employeeId.GetHashCode() % 99999) }
                             
-                            $uName = $payload.fullName
+                            $uName = if ($payload.fullName) { $payload.fullName } elseif ($payload.employeeName) { $payload.employeeName } else { "" }
                             Write-Host "   📥 Writing Employee to Machine: [$codeInt] $uName" -ForegroundColor Cyan
                             
                             # Enable User on Machine
@@ -250,8 +252,10 @@ while ($KeepRunning) {
                             $cmdSuccess = $true
                         }
                         elseif ($action -eq "DELETE_USER") {
+                            $rawCode = if ($payload.enrollNumber) { [string]$payload.enrollNumber } elseif ($payload.punchId) { [string]$payload.punchId } else { [string]$payload.employeeCode }
+                            $cleanCode = ($rawCode -replace '\D', '')
                             $codeInt = 0
-                            [int]::TryParse($payload.employeeCode, [ref]$codeInt) | Out-Null
+                            [int]::TryParse($cleanCode, [ref]$codeInt) | Out-Null
                             if ($codeInt -gt 0) {
                                 Write-Host "   🗑️ Deleting Employee from Machine: [$codeInt]" -ForegroundColor Yellow
                                 $sbx.DeleteEnrollData($MachineNum, $codeInt, 0, 11) | Out-Null
