@@ -1,0 +1,31 @@
+name: release
+# Push a tag like v1.0.1  ->  builds, signs and publishes the update + installer.
+# Every client PC picks the update up within its next check (default 6h).
+on:
+  push:
+    tags: ["v*"]
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch SDK files (not stored in git)
+        shell: pwsh
+        run: |
+          # Provide the Realtime SDK (SBXPC.ocx, dlls) to sdk\ - e.g. from a private artifact/release.
+          # Example: gh release download sdk-v1 --repo ${{ github.repository_owner }}/biometric-sdk --dir sdk
+          Write-Host "Place SDK download step here"
+      - run: choco install innosetup -y --no-progress
+      - name: Build
+        shell: pwsh
+        env:
+          UPDATE_SIGNING_KEY_XML: ${{ secrets.UPDATE_SIGNING_KEY_XML }}
+        run: scripts\build-release.ps1 -Version ("${{ github.ref_name }}".TrimStart("v")) -Repo "${{ github.repository }}"
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/app-*.zip
+            dist/version.json
+            dist/SatyakiranBridge-Setup.exe

@@ -6,3 +6,7 @@ test_*.vbs
 test_*.cs
 test_*.exe
 test_*.ps1
+dist/
+update-private-key.xml
+sdk/*
+!sdk/.gitkeep
