@@ -16,7 +16,7 @@ class StateManager {
   load() {
     try {
       if (fs.existsSync(this.filePath)) {
-        const raw = fs.readFileSync(this.filePath, "utf-8");
+        const raw = fs.readFileSync(this.filePath, "utf-8").replace(/^\uFEFF/, "");
         this.state = JSON.parse(raw);
         if (!this.state.syncedSignatures) this.state.syncedSignatures = {};
       }

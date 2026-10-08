@@ -96,7 +96,8 @@ async function main() {
   let state = { totalSyncedCount: 0, lastSyncAt: "Never" };
   if (fs.existsSync(statePath)) {
     try {
-      state = JSON.parse(fs.readFileSync(statePath, "utf-8"));
+      const raw = fs.readFileSync(statePath, "utf-8").replace(/^\uFEFF/, "");
+      state = JSON.parse(raw);
       console.log(`✅ OK (${state.totalSyncedCount || 0} punches in memory)`);
     } catch {
       console.log("⚠️ Corrupted sync-state file");
