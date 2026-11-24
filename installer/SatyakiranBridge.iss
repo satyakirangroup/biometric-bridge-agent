@@ -42,6 +42,7 @@ Source: "..\register-task.ps1";   DestDir: "{app}"; Flags: ignoreversion
 Source: "..\ctl.ps1";             DestDir: "{app}"; Flags: ignoreversion
 Source: "..\update-pubkey.xml";   DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 Source: "..\app\*";               DestDir: "{app}\app"; Flags: ignoreversion recursesubdirs
+Source: "..\SBXPCDLL_Net.dll";   DestDir: "{app}"; Flags: ignoreversion
 ; 32-bit SDK -> SysWOW64, SBXPC.ocx registered as 32-bit COM
 Source: "..\sdk\SBXPC.ocx";       DestDir: "{syswow64}"; Flags: ignoreversion 32bit regserver
 Source: "..\sdk\*.dll";           DestDir: "{syswow64}"; Flags: ignoreversion 32bit skipifsourcedoesntexist

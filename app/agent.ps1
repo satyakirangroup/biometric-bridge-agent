@@ -39,6 +39,13 @@ if (-not (Test-Path $ConfigFile)) {
     exit 1
 }
 
+# Hardware access goes through the managed SBXPCDLL_Net.dll wrapper (P/Invoke into SBXPCDLL.dll in SysWOW64),
+# not the SBXPC.ocx ActiveX control, which cannot be created from PowerShell on some PCs (E_UNEXPECTED).
+$WrapperDll = Join-Path $AppDir "SBXPCDLL_Net.dll"
+if (-not (Test-Path $WrapperDll)) { $WrapperDll = Join-Path (Split-Path $AppDir -Parent) "SBXPCDLL_Net.dll" }
+if (-not (Test-Path $WrapperDll)) { Write-Log "ERROR" "SBXPCDLL_Net.dll not found next to the agent"; exit 1 }
+[void][Reflection.Assembly]::LoadFrom($WrapperDll)
+
 function Load-Config {
     $c = Get-Content $ConfigFile -Raw | ConvertFrom-Json
     $script:MachineIp   = $c.machine.ip
@@ -89,6 +96,7 @@ function Write-Heartbeat([string]$Status) {
 function Get-VerifyModeName($m) {
     if ($m -eq 1) { return "Fingerprint" }
     if ($m -eq 2) { return "Card" }
+    if ($m -eq 3) { return "Password" }
     return "Face"
 }
 
@@ -102,30 +110,22 @@ function ConvertTo-EnrollInt($payload) {
 }
 
 # --- Way 1: read punches from machine ------------------------------------
-function Read-MachinePunches($sbx) {
+function Read-MachinePunches {
     $records = New-Object System.Collections.ArrayList
-    $hasLogs = $false
-    try { $hasLogs = $sbx.ReadAllGLogData($MachineNum) } catch {}
-    if (-not $hasLogs) { try { $hasLogs = $sbx.ReadGeneralLogData($MachineNum) } catch {} }
-    if (-not $hasLogs) { return @() }
-
-    $tMach = 0; $enrollNo = 0; $eMach = 0; $verifyMode = 0
-    $year = 0; $month = 0; $day = 0; $hour = 0; $minute = 0; $second = 0
-
-    $add = {
-        $dt = "{0}-{1:D2}-{2:D2} {3:D2}:{4:D2}:{5:D2}" -f $year, $month, $day, $hour, $minute, $second
-        [void]$records.Add(@{ code = $enrollNo.ToString(); dt = $dt; mode = $verifyMode })
-    }
-
-    $hasRecord = $false
+    [void][sbxpc.SBXPCDLL]::EnableDevice($MachineNum, 0)
     try {
-        $hasRecord = $sbx.GetAllGLogData($MachineNum, [ref]$tMach, [ref]$enrollNo, [ref]$eMach, [ref]$verifyMode, [ref]$year, [ref]$month, [ref]$day, [ref]$hour, [ref]$minute, [ref]$second)
-    } catch {}
+        $hasLogs = [sbxpc.SBXPCDLL]::ReadAllGLogData($MachineNum)
+        if (-not $hasLogs) { $hasLogs = [sbxpc.SBXPCDLL]::ReadGeneralLogData($MachineNum, 0) }
+        if (-not $hasLogs) { return @() }
 
-    if ($hasRecord) {
-        do { & $add } while ($sbx.GetAllGLogData($MachineNum, [ref]$tMach, [ref]$enrollNo, [ref]$eMach, [ref]$verifyMode, [ref]$year, [ref]$month, [ref]$day, [ref]$hour, [ref]$minute, [ref]$second))
-    } else {
-        while ($sbx.GetGeneralLogData($MachineNum, [ref]$tMach, [ref]$enrollNo, [ref]$eMach, [ref]$verifyMode, [ref]$year, [ref]$month, [ref]$day, [ref]$hour, [ref]$minute, [ref]$second)) { & $add }
+        $tmno = 0; $seno = 0; $smno = 0; $vmode = 0
+        $yr = 0; $mon = 0; $day = 0; $hr = 0; $min = 0; $sec = 0
+        while ([sbxpc.SBXPCDLL]::GetAllGLogData($MachineNum, [ref]$tmno, [ref]$seno, [ref]$smno, [ref]$vmode, [ref]$yr, [ref]$mon, [ref]$day, [ref]$hr, [ref]$min, [ref]$sec)) {
+            $dt = "{0:D4}-{1:D2}-{2:D2} {3:D2}:{4:D2}:{5:D2}" -f $yr, $mon, $day, $hr, $min, $sec
+            [void]$records.Add(@{ code = $seno.ToString(); dt = $dt; mode = $vmode })
+        }
+    } finally {
+        try { [void][sbxpc.SBXPCDLL]::EnableDevice($MachineNum, 1) } catch {}
     }
     return $records.ToArray()
 }
@@ -168,53 +168,72 @@ function Push-Punches($records, $headers) {
 }
 
 # --- Way 2: cloud -> machine commands ------------------------------------
-function Invoke-MachineCommand($sbx, $cmd) {
-    $action = $cmd.action
+function Invoke-MachineCommand($sbxUnused, $cmd) {
+    $action = [string]$cmd.action
     $payload = $cmd.payload
-    if ($action -eq "SET_USER") {
-        $code = ConvertTo-EnrollInt $payload
-        if ($code -le 0 -and $payload.employeeId) { $code = [Math]::Abs($payload.employeeId.GetHashCode() % 99999) }
-        Write-Log "INFO" "SET_USER -> machine enroll #$code"
-        $sbx.EnableUser($MachineNum, $code, 0, $true) | Out-Null
-        return $true
-    }
-    if ($action -eq "DELETE_USER") {
-        $code = ConvertTo-EnrollInt $payload
-        if ($code -le 0) { throw "DELETE_USER without a valid enroll number" }
-        Write-Log "INFO" "DELETE_USER -> machine enroll #$code"
-        $sbx.DeleteEnrollData($MachineNum, $code, 0, 11) | Out-Null
-        return $true
-    }
-    if ($action -eq "SYNC_TIME") {
-        Write-Log "INFO" "SYNC_TIME -> setting machine clock"
-        return [bool]$sbx.SetDeviceTime($MachineNum)
-    }
-    if ($action -eq "GET_USERS") {
-        # Read enrolled users (code + name) from the machine so EMS can create/map the unknown ones.
-        $wanted = @{}
-        if ($payload -and $payload.codes) { foreach ($c in @($payload.codes)) { $wanted[([string]$c).Trim()] = $true } }
-        $users = New-Object System.Collections.ArrayList
-        $total = 0
-        if ($sbx.ReadAllUserID($MachineNum)) {
-            $e = 0; $em = 0; $bk = 0; $pr = 0; $en = 0
-            while ($sbx.GetAllUserID($MachineNum, [ref]$e, [ref]$em, [ref]$bk, [ref]$pr, [ref]$en)) {
-                $total++
-                $code = [string]$e
-                if ($wanted.Count -gt 0 -and -not $wanted.ContainsKey($code)) { continue }
-                if (($users | Where-Object { $_.employeeCode -eq $code }).Count -gt 0) { continue }   # one row per user (not per finger)
-                [void]$users.Add(@{ employeeCode = $code; employeeName = ""; privilege = [int]$pr; enabled = [bool]$en })
+    $dll = [sbxpc.SBXPCDLL]
+    [void]$dll::EnableDevice($MachineNum, 0)
+    try {
+        if ($action -eq "SET_USER" -or $action -eq "CREATE_USER" -or $action -eq "UPDATE_USER") {
+            $code = ConvertTo-EnrollInt $payload
+            if ($code -le 0) { throw "$action without a valid enroll number" }
+            $name = [string]$(if ($payload.employeeName) { $payload.employeeName } elseif ($payload.fullName) { $payload.fullName } else { "" })
+            Write-Log "INFO" "$action -> machine enroll #$code ($name)"
+            if ($name) { [void]$dll::SetUserName1($MachineNum, $code, $name) }
+            if ($action -ne "UPDATE_USER") { [void]$dll::EnableUser($MachineNum, $code, 0, 0, [byte]1) }
+            return $true
+        }
+        if ($action -eq "DELETE_USER" -or $action -eq "REMOVE_USER") {
+            $code = ConvertTo-EnrollInt $payload
+            if ($code -le 0) { throw "$action without a valid enroll number" }
+            Write-Log "INFO" "$action -> machine enroll #$code"
+            $r = $dll::DeleteEnrollData($MachineNum, $code, 0, 12)
+            if (-not $r) { [void]$dll::DeleteEnrollData($MachineNum, $code, 0, 11) }
+            [void]$dll::SetUserName1($MachineNum, $code, "")
+            [void]$dll::EnableUser($MachineNum, $code, 0, 0, [byte]0)
+            return $true
+        }
+        if ($action -eq "ENABLE_USER" -or $action -eq "DISABLE_USER") {
+            $code = ConvertTo-EnrollInt $payload
+            if ($code -le 0) { throw "$action without a valid enroll number" }
+            [void]$dll::EnableUser($MachineNum, $code, 0, 0, [byte]$(if ($action -eq "ENABLE_USER") { 1 } else { 0 }))
+            return $true
+        }
+        if ($action -eq "SYNC_TIME") {
+            Write-Log "INFO" "SYNC_TIME -> setting machine clock"
+            return [bool]$dll::SetDeviceTime($MachineNum)
+        }
+        if ($action -eq "CLEAR_LOGS") {
+            return [bool]$dll::EmptyGeneralLogData($MachineNum)
+        }
+        if ($action -eq "GET_USERS") {
+            # Enrolled users (code + name) so EMS can create / map the codes it does not know yet.
+            $wanted = @{}
+            if ($payload -and $payload.codes) { foreach ($c in @($payload.codes)) { $wanted[([string]$c).Trim()] = $true } }
+            $seen = New-Object System.Collections.Generic.List[int]
+            $total = 0
+            if ($dll::ReadAllUserID($MachineNum)) {
+                $e = 0; $em = 0; $bk = 0; $pr = 0; $en = 0
+                while ($dll::GetAllUserID($MachineNum, [ref]$e, [ref]$em, [ref]$bk, [ref]$pr, [ref]$en)) {
+                    $total++
+                    if (-not $seen.Contains($e)) { $seen.Add($e) }
+                }
             }
+            $users = New-Object System.Collections.ArrayList
+            foreach ($u in $seen) {
+                if ($wanted.Count -gt 0 -and -not $wanted.ContainsKey([string]$u)) { continue }
+                $nm = ""
+                try { [void]$dll::GetUserName1($MachineNum, $u, [ref]$nm) } catch {}
+                [void]$users.Add(@{ employeeCode = [string]$u; employeeName = ([string]$nm).Trim() })
+            }
+            Write-Log "INFO" "GET_USERS -> $total record(s) on machine, $($seen.Count) distinct user(s), returning $($users.Count)"
+            $script:LastResult = @{ users = $users.ToArray(); totalOnMachine = $seen.Count; wanted = @($wanted.Keys) }
+            return $true
         }
-        foreach ($u in $users) {
-            $nm = ""
-            try { [void]$sbx.GetUserName1($MachineNum, [int]$u.employeeCode, [ref]$nm) } catch {}
-            if ($nm) { $u.employeeName = ([string]$nm).Trim() }
-        }
-        Write-Log "INFO" "GET_USERS -> read $total record(s) from machine, returning $($users.Count) user(s)"
-        $script:LastResult = @{ users = $users.ToArray(); totalOnMachine = $total; wanted = @($wanted.Keys) }
-        return $true
+        throw "Unknown command action: $action"
+    } finally {
+        try { [void]$dll::EnableDevice($MachineNum, 1) } catch {}
     }
-    throw "Unknown command action: $action"
 }
 
 function Process-Commands($sbx, $commands, $headers) {
@@ -237,35 +256,33 @@ Remove-OldLogs
 $lastLogClean = Get-Date
 
 while ($true) {
-    $sbx = $null
+    $connected = $false
     try {
         Load-Config   # picks up config.json edits without restart
         Write-Heartbeat "polling"
         $headers = @{ "Content-Type" = "application/json"; "User-Agent" = "Satyakiran-Bridge/$Version" }
         if ($AuthToken) { $headers["Authorization"] = "Bearer $AuthToken" }
 
-        $sbx = New-Object -ComObject "SBXPC.SBXPCCtrl.1"
-        try { $sbx.DotNET() } catch {}
-        $connected = $sbx.ConnectTcpip($MachineNum, $MachineIp, $MachinePort, $MachinePass)
+        [sbxpc.SBXPCDLL]::DotNET()
+        try { [sbxpc.SBXPCDLL]::_DisableTranseiveCallback() } catch {}
+        $connected = [sbxpc.SBXPCDLL]::ConnectTcpip($MachineNum, $MachineIp, $MachinePort, $MachinePass)
 
         if ($connected) {
             $commands = @()
-            $records = Read-MachinePunches $sbx
+            $records = Read-MachinePunches
             $commands += @(Push-Punches $records $headers)
 
             if ($commands.Count -eq 0) {
                 try { $res = Invoke-RestMethod -Uri $CommandsUrl -Method Get -Headers $headers -TimeoutSec 15; if ($res) { $commands = @($res) } } catch {}
             }
-            if ($commands.Count -gt 0) { Process-Commands $sbx $commands $headers }
-
-            try { $sbx.Disconnect() } catch { try { $sbx.CloseCommPort() } catch {} }
+            if ($commands.Count -gt 0) { Process-Commands $null $commands $headers }
         } else {
             Write-Log "WARN" "Cannot reach biometric device at $MachineIp`:$MachinePort (offline or busy)"
         }
     } catch {
         Write-Log "WARN" "Bridge error: $($_.Exception.Message)"
     } finally {
-        if ($sbx) { try { [void][Runtime.InteropServices.Marshal]::ReleaseComObject($sbx) } catch {} }
+        if ($connected) { try { [void][sbxpc.SBXPCDLL]::Disconnect($MachineNum) } catch {} }
     }
 
     if (((Get-Date) - $lastLogClean).TotalHours -ge 24) { Remove-OldLogs; $lastLogClean = Get-Date }

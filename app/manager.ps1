@@ -82,18 +82,24 @@ function Test-Machine($v) {
     if (-not (Test-TcpPort $v.ip ([int]$v.port))) {
         return "FAILED: this PC cannot reach $($v.ip):$($v.port) at all.`nCheck the machine IP / WiFi, that the machine is on, and that this PC is on the same network."
     }
-    $sbx = $null
     try {
-        $sbx = New-Object -ComObject "SBXPC.SBXPCCtrl.1"
-        try { $sbx.DotNET() } catch {}
+        $dllPath = Join-Path $AppDir "SBXPCDLL_Net.dll"
+        if (-not (Test-Path $dllPath)) { $dllPath = Join-Path $Root "SBXPCDLL_Net.dll" }
+        if (-not (Test-Path $dllPath)) { return "FAILED: SBXPCDLL_Net.dll is missing from the install folder." }
+        if (-not ("sbxpc.SBXPCDLL" -as [type])) { [void][Reflection.Assembly]::LoadFrom($dllPath) }
+        [sbxpc.SBXPCDLL]::DotNET()
+        try { [sbxpc.SBXPCDLL]::_DisableTranseiveCallback() } catch {}
         for ($i = 0; $i -lt 2; $i++) {
-            if ($sbx.ConnectTcpip([int]$v.num, $v.ip, [int]$v.port, [int]$v.pass)) { try { $sbx.Disconnect() } catch {}; return "OK: connected to the machine at $($v.ip):$($v.port)." }
+            if ([sbxpc.SBXPCDLL]::ConnectTcpip([int]$v.num, $v.ip, [int]$v.port, [int]$v.pass)) {
+                try { [void][sbxpc.SBXPCDLL]::Disconnect([int]$v.num) } catch {}
+                return "OK: connected to the machine at $($v.ip):$($v.port)."
+            }
             Start-Sleep -Seconds 2
         }
         return "Port is open but the machine did not accept the SDK connection.`nCheck Machine No. and Comm Key (password) on the machine, or close other software connected to it (it allows one connection at a time)."
     } catch {
-        return "FAILED: biometric SDK (SBXPC.ocx) is not registered on this PC.`n$($_.Exception.Message)"
-    } finally { if ($sbx) { try { [void][Runtime.InteropServices.Marshal]::ReleaseComObject($sbx) } catch {} } }
+        return "FAILED: could not load the biometric SDK (SBXPCDLL.dll must be in C:\Windows\SysWOW64).`n$($_.Exception.Message)"
+    }
 }
 
 function Test-Cloud($v) {

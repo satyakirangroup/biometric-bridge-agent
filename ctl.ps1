@@ -17,10 +17,12 @@ if (($Command -in "test", "synctime") -and [Environment]::Is64BitProcess -and (T
 
 function Connect-Machine {
     $c = (Get-Content (Join-Path $DataDir "config.json") -Raw | ConvertFrom-Json).machine
-    $sbx = New-Object -ComObject "SBXPC.SBXPCCtrl.1"
-    try { $sbx.DotNET() } catch {}
-    $ok = $sbx.ConnectTcpip([int]$c.machineNumber, $c.ip, [int]$c.port, [int]$c.password)
-    return @{ sbx = $sbx; ok = $ok; num = [int]$c.machineNumber; ip = $c.ip; port = $c.port }
+    $dllPath = Join-Path $Root "SBXPCDLL_Net.dll"
+    if (-not ("sbxpc.SBXPCDLL" -as [type])) { [void][Reflection.Assembly]::LoadFrom($dllPath) }
+    [sbxpc.SBXPCDLL]::DotNET()
+    try { [sbxpc.SBXPCDLL]::_DisableTranseiveCallback() } catch {}
+    $ok = [sbxpc.SBXPCDLL]::ConnectTcpip([int]$c.machineNumber, $c.ip, [int]$c.port, [int]$c.password)
+    return @{ ok = $ok; num = [int]$c.machineNumber; ip = $c.ip; port = $c.port }
 }
 
 switch ($Command) {
@@ -51,11 +53,11 @@ switch ($Command) {
     }
     "test" {
         $m = Connect-Machine
-        if ($m.ok) { Write-Host "OK: connected to machine $($m.ip):$($m.port)"; try { $m.sbx.Disconnect() } catch {} } else { Write-Host "FAILED: cannot reach $($m.ip):$($m.port)"; exit 2 }
+        if ($m.ok) { Write-Host "OK: connected to machine $($m.ip):$($m.port)"; try { [void][sbxpc.SBXPCDLL]::Disconnect($m.num) } catch {} } else { Write-Host "FAILED: cannot reach $($m.ip):$($m.port)"; exit 2 }
     }
     "synctime" {
         $m = Connect-Machine
         if (-not $m.ok) { Write-Host "FAILED: cannot reach machine"; exit 2 }
-        Write-Host "Clock set: $([bool]$m.sbx.SetDeviceTime($m.num))"; try { $m.sbx.Disconnect() } catch {}
+        Write-Host "Clock set: $([bool][sbxpc.SBXPCDLL]::SetDeviceTime($m.num))"; try { [void][sbxpc.SBXPCDLL]::Disconnect($m.num) } catch {}
     }
 }
