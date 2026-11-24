@@ -49,9 +49,51 @@ class SbxpcConnector {
     });
   }
 
+  _getBridgeExecution(action, extraArgs = []) {
+    const rootExe = path.resolve(__dirname, "../SbxpcBridge.exe");
+    const nativeExe = path.resolve(__dirname, "native/sbxpc-bridge.exe");
+    const exe = fs.existsSync(rootExe) ? rootExe : (fs.existsSync(nativeExe) ? nativeExe : null);
+
+    if (exe) {
+      return {
+        bin: exe,
+        args: [
+          action,
+          String(this.machineNumber),
+          this.ip,
+          String(this.port),
+          String(this.password),
+          this.deviceName,
+          ...extraArgs.map(String)
+        ]
+      };
+    }
+
+    const sysRoot = process.env.SystemRoot || process.env.windir || "C:\\Windows";
+    const x86Ps = path.join(sysRoot, "SysWOW64", "WindowsPowerShell", "v1.0", "powershell.exe");
+    const psExe = fs.existsSync(x86Ps) ? x86Ps : "powershell.exe";
+    const bridgeScript = path.resolve(__dirname, "native/sbxpc-bridge.ps1");
+
+    return {
+      bin: psExe,
+      args: [
+        "-NoProfile",
+        "-ExecutionPolicy", "Bypass",
+        "-File", bridgeScript,
+        action,
+        String(this.machineNumber),
+        this.ip,
+        String(this.port),
+        String(this.password),
+        this.deviceName,
+        ...extraArgs.map(String)
+      ]
+    };
+  }
+
   /**
    * Reads attendance logs from the machine.
-   * On Windows, it invokes the native 32-bit SBXPCDLL bridge via SysWOW64 PowerShell.
+   * On Windows, it invokes the native SbxpcBridge.exe or SysWOW64 PowerShell bridge.
    */
   async fetchLogs() {
     if (os.platform() === "win32") {
@@ -66,29 +108,13 @@ class SbxpcConnector {
   }
 
   /**
-   * Native 32-bit SBXPCDLL Automation via SysWOW64 PowerShell.
-   * Directly interfaces with vendor C# wrapper and native SBXPCDLL.dll / SBPCCOMM.dll.
+   * Native 32-bit SBXPCDLL Automation.
+   * Directly interfaces with SbxpcBridge.exe or native SBXPCDLL.dll / SBPCCOMM.dll.
    */
   async _fetchLogsViaNativeBridge() {
     return new Promise((resolve, reject) => {
-      const sysRoot = process.env.SystemRoot || process.env.windir || "C:\\Windows";
-      const x86Ps = path.join(sysRoot, "SysWOW64", "WindowsPowerShell", "v1.0", "powershell.exe");
-      const psExe = fs.existsSync(x86Ps) ? x86Ps : "powershell.exe";
-      const bridgeScript = path.resolve(__dirname, "native/sbxpc-bridge.ps1");
-
-      const args = [
-        "-NoProfile",
-        "-ExecutionPolicy", "Bypass",
-        "-File", bridgeScript,
-        "fetch-logs",
-        String(this.machineNumber),
-        this.ip,
-        String(this.port),
-        String(this.password),
-        this.deviceName
-      ];
-
-      const proc = spawn(psExe, args);
+      const exec = this._getBridgeExecution("fetch-logs");
+      const proc = spawn(exec.bin, exec.args);
       let stdout = "";
       let stderr = "";
 
@@ -138,24 +164,8 @@ class SbxpcConnector {
    */
   async inspectMachine() {
     return new Promise((resolve, reject) => {
-      const sysRoot = process.env.SystemRoot || process.env.windir || "C:\\Windows";
-      const x86Ps = path.join(sysRoot, "SysWOW64", "WindowsPowerShell", "v1.0", "powershell.exe");
-      const psExe = fs.existsSync(x86Ps) ? x86Ps : "powershell.exe";
-      const bridgeScript = path.resolve(__dirname, "native/sbxpc-bridge.ps1");
-
-      const args = [
-        "-NoProfile",
-        "-ExecutionPolicy", "Bypass",
-        "-File", bridgeScript,
-        "inspect",
-        String(this.machineNumber),
-        this.ip,
-        String(this.port),
-        String(this.password),
-        this.deviceName
-      ];
-
-      const proc = spawn(psExe, args);
+      const exec = this._getBridgeExecution("inspect");
+      const proc = spawn(exec.bin, exec.args);
       let stdout = "";
       let stderr = "";
 
@@ -196,29 +206,12 @@ class SbxpcConnector {
   }
 
   /**
-   * Helper to execute native PowerShell bridge actions.
+   * Helper to execute native bridge actions.
    */
   async _runBridge(action, extraArgs = [], timeoutMs = 60000) {
     return new Promise((resolve, reject) => {
-      const sysRoot = process.env.SystemRoot || process.env.windir || "C:\\Windows";
-      const x86Ps = path.join(sysRoot, "SysWOW64", "WindowsPowerShell", "v1.0", "powershell.exe");
-      const psExe = fs.existsSync(x86Ps) ? x86Ps : "powershell.exe";
-      const bridgeScript = path.resolve(__dirname, "native/sbxpc-bridge.ps1");
-
-      const args = [
-        "-NoProfile",
-        "-ExecutionPolicy", "Bypass",
-        "-File", bridgeScript,
-        action,
-        String(this.machineNumber),
-        this.ip,
-        String(this.port),
-        String(this.password),
-        this.deviceName,
-        ...extraArgs.map(String)
-      ];
-
-      const proc = spawn(psExe, args);
+      const exec = this._getBridgeExecution(action, extraArgs);
+      const proc = spawn(exec.bin, exec.args);
       let stdout = "";
       let stderr = "";
 
