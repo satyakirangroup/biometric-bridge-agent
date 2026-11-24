@@ -16,16 +16,22 @@ class CloudPusher {
     }
 
     try {
-      const payload = punches.map((p) => ({
-        employeeCode: String(p.employeeCode || p.Empcode || p.tatempcode || p.UserId || "").trim(),
-        employeeName: p.employeeName || p.EmployeeName || undefined,
-        logDateTime: p.logDateTime || p.LogDateTime || p.punchTime,
-        direction: p.direction || p.Direction || "AUTO",
-        verificationMode: p.verificationMode || p.VerificationMode || "Face",
-        deviceSerial: p.deviceSerial || p.DeviceSerialNo || "Realtime-Hardware",
-        deviceName: p.deviceName || p.DeviceName || "Office Biometric",
-        branchId: this.branchId
-      }));
+      const payload = punches.map((p) => {
+        let dt = p.logDateTime || p.LogDateTime || p.punchTime;
+        if (typeof dt === "string" && dt && !dt.includes("+") && !dt.includes("Z")) {
+          dt = dt.trim().replace(" ", "T") + "+05:30";
+        }
+        return {
+          employeeCode: String(p.employeeCode || p.Empcode || p.tatempcode || p.UserId || "").trim(),
+          employeeName: p.employeeName || p.EmployeeName || undefined,
+          logDateTime: dt,
+          direction: p.direction || p.Direction || "AUTO",
+          verificationMode: p.verificationMode || p.VerificationMode || "Face",
+          deviceSerial: p.deviceSerial || p.DeviceSerialNo || "Realtime-Hardware",
+          deviceName: p.deviceName || p.DeviceName || "Office Biometric",
+          branchId: this.branchId
+        };
+      });
 
       const headers = {
         "Content-Type": "application/json",
@@ -98,7 +104,7 @@ class CloudPusher {
   /**
    * 2-Way: Acknowledges command execution status back to the cloud.
    */
-  async acknowledgeCommand(commandId, status, error) {
+  async acknowledgeCommand(commandId, status, error, result) {
     try {
       const baseUrl = this.apiUrl.replace(/\/biometric-push$/, "");
       const url = `${baseUrl}/biometric-commands/ack`;
@@ -113,7 +119,7 @@ class CloudPusher {
       await fetch(url, {
         method: "POST",
         headers,
-        body: JSON.stringify({ commandId, status: normalizedStatus, error: error || null })
+        body: JSON.stringify({ commandId, status: normalizedStatus, error: error || null, result: result || undefined })
       });
       return true;
     } catch (err) {

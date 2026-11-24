@@ -189,16 +189,41 @@ function Invoke-MachineCommand($sbx, $cmd) {
         Write-Log "INFO" "SYNC_TIME -> setting machine clock"
         return [bool]$sbx.SetDeviceTime($MachineNum)
     }
+    if ($action -eq "GET_USERS") {
+        # Read enrolled users (code + name) from the machine so EMS can create/map the unknown ones.
+        $wanted = @{}
+        if ($payload -and $payload.codes) { foreach ($c in @($payload.codes)) { $wanted[([string]$c).Trim()] = $true } }
+        $users = New-Object System.Collections.ArrayList
+        $total = 0
+        if ($sbx.ReadAllUserID($MachineNum)) {
+            $e = 0; $em = 0; $bk = 0; $pr = 0; $en = 0
+            while ($sbx.GetAllUserID($MachineNum, [ref]$e, [ref]$em, [ref]$bk, [ref]$pr, [ref]$en)) {
+                $total++
+                $code = [string]$e
+                if ($wanted.Count -gt 0 -and -not $wanted.ContainsKey($code)) { continue }
+                if (($users | Where-Object { $_.employeeCode -eq $code }).Count -gt 0) { continue }   # one row per user (not per finger)
+                [void]$users.Add(@{ employeeCode = $code; employeeName = ""; privilege = [int]$pr; enabled = [bool]$en })
+            }
+        }
+        foreach ($u in $users) {
+            $nm = ""
+            try { [void]$sbx.GetUserName1($MachineNum, [int]$u.employeeCode, [ref]$nm) } catch {}
+            if ($nm) { $u.employeeName = ([string]$nm).Trim() }
+        }
+        Write-Log "INFO" "GET_USERS -> read $total record(s) from machine, returning $($users.Count) user(s)"
+        $script:LastResult = @{ users = $users.ToArray(); totalOnMachine = $total; wanted = @($wanted.Keys) }
+        return $true
+    }
     throw "Unknown command action: $action"
 }
 
 function Process-Commands($sbx, $commands, $headers) {
     Write-Log "INFO" "Processing $($commands.Count) cloud command(s)"
     foreach ($cmd in $commands) {
-        $ok = $false; $err = $null
+        $ok = $false; $err = $null; $script:LastResult = $null
         try { $ok = Invoke-MachineCommand $sbx $cmd } catch { $err = $_.Exception.Message; Write-Log "ERROR" "Command $($cmd.action) failed: $err" }
         $status = if ($ok) { "COMPLETED" } else { "FAILED" }
-        $ack = ConvertTo-Json -Compress -InputObject @{ commandId = $cmd.id; status = $status; error = $err }
+        $ack = ConvertTo-Json -Compress -Depth 6 -InputObject @{ commandId = $cmd.id; status = $status; error = $err; result = $script:LastResult }
         try {
             Invoke-RestMethod -Uri $AckUrl -Method Post -Headers $headers -Body $ack -TimeoutSec 15 | Out-Null
             Write-Log "INFO" "Command $($cmd.action) ($($cmd.id)) acknowledged as $status"

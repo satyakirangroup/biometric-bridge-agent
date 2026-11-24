@@ -6,6 +6,19 @@
 #ifndef AppVersion
   #define AppVersion "1.0.0"
 #endif
+; Optional pre-fill, passed by build-release.ps1:  /DDefaultToken=... /DDefaultBranch=... /DDefaultIp=... /DManifestUrl=...
+#ifndef DefaultToken
+  #define DefaultToken ""
+#endif
+#ifndef DefaultBranch
+  #define DefaultBranch ""
+#endif
+#ifndef DefaultIp
+  #define DefaultIp "192.168.0.124"
+#endif
+#ifndef ManifestUrl
+  #define ManifestUrl ""
+#endif
 
 [Setup]
 AppId={{6F1B7A52-3C0E-4E8B-9D4B-5A7A2C0B1E01}
@@ -43,13 +56,18 @@ Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; \
   Flags: runhidden; RunOnceId: "RemoveTask"
 
 [Icons]
-Name: "{commonprograms}\Satyakiran Bridge Status"; Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; \
-  Parameters: "-NoProfile -ExecutionPolicy Bypass -NoExit -File ""{app}\ctl.ps1"" status"
+; The settings UI (32-bit PowerShell: the machine SDK is 32-bit COM). It elevates itself.
+Name: "{commonprograms}\Satyakiran Bridge"; Filename: "{syswow64}\WindowsPowerShell\v1.0\powershell.exe"; \
+  Parameters: "-NoProfile -ExecutionPolicy Bypass -STA -WindowStyle Hidden -File ""{app}\app\manager.ps1"""; WorkingDir: "{app}"
+Name: "{commondesktop}\Satyakiran Bridge"; Filename: "{syswow64}\WindowsPowerShell\v1.0\powershell.exe"; \
+  Parameters: "-NoProfile -ExecutionPolicy Bypass -STA -WindowStyle Hidden -File ""{app}\app\manager.ps1"""; WorkingDir: "{app}"
+
+[Run]
+Filename: "{syswow64}\WindowsPowerShell\v1.0\powershell.exe"; \
+  Parameters: "-NoProfile -ExecutionPolicy Bypass -STA -WindowStyle Hidden -File ""{app}\app\manager.ps1"""; \
+  Description: "Open Satyakiran Bridge settings now"; Flags: postinstall nowait skipifsilent
 
 [Code]
-var
-  CfgPage: TInputQueryWizardPage;
-
 function PsExe(): String;
 begin
   Result := ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe');
@@ -60,64 +78,27 @@ begin
   Result := ExpandConstant('{commonappdata}\SatyakiranBridge\config.json');
 end;
 
-function JsonEscape(S: String): String;
-begin
-  StringChangeEx(S, '\', '\\', True);
-  StringChangeEx(S, '"', '\"', True);
-  Result := S;
-end;
-
-procedure InitializeWizard();
-begin
-  CfgPage := CreateInputQueryPage(wpSelectDir, 'Biometric machine & cloud',
-    'Enter the details for this site', 'You can change these later in config.json (no reinstall needed).');
-  CfgPage.Add('Biometric machine IP:', False);
-  CfgPage.Add('Machine port:', False);
-  CfgPage.Add('Machine name (shown in reports):', False);
-  CfgPage.Add('Branch ID:', False);
-  CfgPage.Add('Cloud auth token:', True);
-  CfgPage.Values[0] := '192.168.1.224';
-  CfgPage.Values[1] := '5005';
-  CfgPage.Values[2] := 'Biometric Machine';
-end;
-
-function ShouldSkipPage(PageID: Integer): Boolean;
-begin
-  { Upgrade / re-install: keep the existing config.json untouched }
-  Result := (PageID = CfgPage.ID) and FileExists(ConfigPath());
-end;
-
-function NextButtonClick(CurPageID: Integer): Boolean;
-begin
-  Result := True;
-  if CurPageID = CfgPage.ID then
-    if (Trim(CfgPage.Values[0]) = '') or (Trim(CfgPage.Values[3]) = '') or (Trim(CfgPage.Values[4]) = '') then
-    begin
-      MsgBox('Machine IP, Branch ID and Auth token are required.', mbError, MB_OK);
-      Result := False;
-    end;
-end;
-
 procedure CurStepChanged(CurStep: TSetupStep);
 var
-  Json: String;
+  Json, Upd: String;
   RC: Integer;
 begin
   if CurStep = ssInstall then
     Exec(PsExe(), '-NoProfile -ExecutionPolicy Bypass -File "' + ExpandConstant('{app}') + '\register-task.ps1" -Action stop',
       '', SW_HIDE, ewWaitUntilTerminated, RC);
 
+  { First install only: write a starter config. Upgrades keep the existing one. IP / token / branch are then edited in the UI. }
   if (CurStep = ssPostInstall) and (not FileExists(ConfigPath())) then
   begin
+    Upd := '"update": { "enabled": true, "checkHours": 6';
+    if '{#ManifestUrl}' <> '' then Upd := Upd + ', "manifestUrl": "{#ManifestUrl}"';
+    Upd := Upd + ' }';
     Json :=
       '{' + #13#10 +
-      '  "machine": { "ip": "' + JsonEscape(Trim(CfgPage.Values[0])) + '", "port": ' + Trim(CfgPage.Values[1]) +
-        ', "machineNumber": 1, "password": 0, "deviceName": "' + JsonEscape(Trim(CfgPage.Values[2])) + '" },' + #13#10 +
-      '  "cloud": { "apiUrl": "https://api.satyakiran.co.in/api/v1/hrms/attendance/biometric-push", "authToken": "' +
-        JsonEscape(Trim(CfgPage.Values[4])) + '", "branchId": "' + JsonEscape(Trim(CfgPage.Values[3])) +
-        '", "syncIntervalSeconds": 30 },' + #13#10 +
+      '  "machine": { "ip": "{#DefaultIp}", "port": 5005, "machineNumber": 1, "password": 0, "deviceName": "Biometric Machine" },' + #13#10 +
+      '  "cloud": { "apiUrl": "https://api.satyakiran.co.in/api/v1/hrms/attendance/biometric-push", "authToken": "{#DefaultToken}", "branchId": "{#DefaultBranch}", "syncIntervalSeconds": 30 },' + #13#10 +
       '  "options": { "maxBatchSize": 100 },' + #13#10 +
-      '  "update": { "enabled": true, "checkHours": 6 }' + #13#10 +
+      '  ' + Upd + #13#10 +
       '}';
     SaveStringToFile(ConfigPath(), Json, False);
   end;

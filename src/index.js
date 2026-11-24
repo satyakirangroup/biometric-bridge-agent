@@ -2,6 +2,7 @@ const http = require("http");
 const fs = require("fs");
 const path = require("path");
 const StateManager = require("./state-manager");
+const RawLogStore = require("./raw-log-store");
 const CloudPusher = require("./cloud-pusher");
 const SbxpcConnector = require("./sbxpc-connector");
 
@@ -14,6 +15,7 @@ if (!fs.existsSync(configPath)) {
 
 const config = JSON.parse(fs.readFileSync(configPath, "utf-8"));
 const stateManager = new StateManager(config.options?.syncStateFile || "./sync-state.json");
+const rawStore = new RawLogStore(path.resolve(__dirname, "../logs"));
 const pusher = new CloudPusher(config.cloud);
 const connector = new SbxpcConnector(config.machine);
 
@@ -121,18 +123,13 @@ async function syncCycle() {
       return;
     }
 
-    // Auto-save raw logs snapshot to local files for offline verification & Excel viewing
+    // Archive every punch date-wise (logs/raw_machine_punches.json) — grows only, never overwritten by a smaller machine snapshot
     try {
-      const logsDir = path.resolve(__dirname, "../logs");
-      if (!fs.existsSync(logsDir)) fs.mkdirSync(logsDir, { recursive: true });
-      fs.writeFileSync(path.join(logsDir, "raw_machine_punches.json"), JSON.stringify(rawLogs, null, 2), "utf-8");
-
-      const csvRows = ["EmployeeCode,EmployeeName,LogDateTime,Direction,VerificationMode,DeviceSerial,DeviceName"];
-      for (const log of rawLogs) {
-        csvRows.push(`${log.employeeCode},"${log.employeeName || ""}",${log.logDateTime},${log.direction},${log.verificationMode},${log.deviceSerial},"${log.deviceName}"`);
-      }
-      fs.writeFileSync(path.join(logsDir, "raw_machine_punches.csv"), csvRows.join("\n"), "utf-8");
-    } catch {}
+      const added = rawStore.add(rawLogs);
+      if (added > 0) log("INFO", `🗂️  Raw log archive updated: +${added} punch(es) (total ${rawStore.byKey.size})`);
+    } catch (err) {
+      log("WARN", `Could not update raw log archive: ${err.message}`);
+    }
 
     // 3. Filter out logs that were already synced
     const newLogs = rawLogs.filter((log) => !stateManager.isAlreadySynced(log));

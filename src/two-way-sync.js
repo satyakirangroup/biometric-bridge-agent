@@ -118,10 +118,33 @@ async function processCloudCommands() {
           await pusher.acknowledgeCommand(cmdId, "SUCCESS");
           totalCommandsExecuted++;
 
+        } else if (action === "GET_USERS") {
+          // Read enrolled users from the machine; return only the requested codes (or everyone if none given).
+          const wanted = new Set((payload.codes || []).map((c) => String(c).trim()));
+          const all = await connector.getUsers();
+          const users = all
+            .map((u) => ({
+              employeeCode: String(u.employeeCode ?? u.EnrollNumber ?? "").trim(),
+              employeeName: String(u.employeeName || "").trim(),
+              privilege: u.privilege ?? 0,
+              enabled: u.enabled !== false
+            }))
+            .filter((u) => u.employeeCode && (wanted.size === 0 || wanted.has(u.employeeCode)));
+          log("SUCCESS", `[GET USERS] Read ${all.length} user(s) from hardware, returning ${users.length}.`);
+          await pusher.acknowledgeCommand(cmdId, "SUCCESS", null, { users, totalOnMachine: all.length, wanted: [...wanted] });
+          totalCommandsExecuted++;
+
         } else if (action === "CLEAR_LOGS") {
           await connector.clearLogs();
           log("SUCCESS", `Cleared attendance logs on biometric device!`);
           await pusher.acknowledgeCommand(cmdId, "SUCCESS");
+          totalCommandsExecuted++;
+
+        } else if (action === "FORCE_PULL" || action === "PULL_PUNCHES" || action === "SYNC_NOW" || action === "GET_STATUS") {
+          log("CLOUD_CMD", `[FORCE PULL] Reading and pushing logs from biometric hardware...`);
+          const count = await processAttendancePushes();
+          log("SUCCESS", `[FORCE PULL] Synchronized ${count} punch(es) from hardware!`);
+          await pusher.acknowledgeCommand(cmdId, "SUCCESS", { pulledCount: count });
           totalCommandsExecuted++;
 
         } else {
