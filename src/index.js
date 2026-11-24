@@ -93,6 +93,19 @@ async function processPendingCommands() {
           log("SUCCESS", `✅ Cleared device punch logs per Cloud command!`);
           await pusher.acknowledgeCommand(cmdId, "SUCCESS");
 
+        } else if (action === "GET_USERS") {
+          // Read enrolled users (code + name) from the machine; return the requested codes (or everyone if none given).
+          const wanted = new Set((payload.codes || []).map((c) => String(c).trim()));
+          const all = await connector.getUsers();
+          const users = all
+            .map((u) => ({
+              employeeCode: String(u.employeeCode ?? u.EnrollNumber ?? "").trim(),
+              employeeName: String(u.employeeName || "").trim()
+            }))
+            .filter((u) => u.employeeCode && (wanted.size === 0 || wanted.has(u.employeeCode)));
+          log("SUCCESS", `✅ [GET USERS] Read ${all.length} user(s) from machine, returning ${users.length}.`);
+          await pusher.acknowledgeCommand(cmdId, "SUCCESS", null, { users, totalOnMachine: all.length, wanted: [...wanted] });
+
         } else {
           log("WARN", `⚠️ Unknown command action '${action}'. Skipping.`);
           await pusher.acknowledgeCommand(cmdId, "FAILED", `Unknown command action: ${action}`);
