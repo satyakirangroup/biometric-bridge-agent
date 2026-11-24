@@ -304,7 +304,10 @@ namespace SbxpcBridge
         static int DoGetUsers(int machNo)
         {
             var empMap = LoadEmployeeMap();
-            var users = new List<int>();
+            var order = new List<int>();
+            var backups = new Dictionary<int, List<int>>();
+            var priv = new Dictionary<int, int>();
+            var enable = new Dictionary<int, int>();
 
             SBXPCDLL.EnableDevice(machNo, 0);
             try
@@ -314,9 +317,12 @@ namespace SbxpcBridge
                     int uEnroll = 0, uEmach = 0, uBackup = 0, uPriv = 0, uEnable = 0;
                     while (SBXPCDLL.GetAllUserID(machNo, out uEnroll, out uEmach, out uBackup, out uPriv, out uEnable))
                     {
-                        if (!users.Contains(uEnroll))
+                        if (!backups.ContainsKey(uEnroll))
                         {
-                            users.Add(uEnroll);
+                            order.Add(uEnroll);
+                            backups[uEnroll] = new List<int>();
+                            priv[uEnroll] = uPriv;
+                            enable[uEnroll] = uEnable;
                             string uStr = uEnroll.ToString();
                             if (!empMap.ContainsKey(uStr) || string.IsNullOrEmpty(empMap[uStr]))
                             {
@@ -328,6 +334,7 @@ namespace SbxpcBridge
                                 }
                             }
                         }
+                        if (!backups[uEnroll].Contains(uBackup)) backups[uEnroll].Add(uBackup);
                     }
                     SaveEmployeeMap(empMap);
                 }
@@ -335,13 +342,39 @@ namespace SbxpcBridge
                 StringBuilder sb = new StringBuilder();
                 sb.Append("[");
                 bool first = true;
-                foreach (int u in users)
+                foreach (int u in order)
                 {
                     if (!first) sb.Append(",");
                     first = false;
                     string uStr = u.ToString();
                     string name = empMap.ContainsKey(uStr) ? empMap[uStr] : "";
-                    sb.Append("{\"employeeCode\":\"").Append(uStr).Append("\",\"employeeName\":\"").Append(EscapeJson(name)).Append("\"}");
+                    var bk = backups[u];
+                    bk.Sort();
+                    int fp = 0;
+                    var other = new List<string>();
+                    foreach (int b in bk) { if (b >= 0 && b <= 9) fp++; else if (b > 11) other.Add(b.ToString()); }
+                    bool hasPwd = bk.Contains(10), hasCard = bk.Contains(11);
+                    string card = "";
+                    if (hasCard)
+                    {
+                        try
+                        {
+                            int cp = 0, cn = 0;
+                            if (SBXPCDLL.GetEnrollData1(machNo, u, 11, out cp, IntPtr.Zero, out cn)) card = cn.ToString();
+                        }
+                        catch { }
+                    }
+                    var bkStr = new List<string>();
+                    foreach (int b in bk) bkStr.Add(b.ToString());
+                    sb.Append("{\"employeeCode\":\"").Append(uStr).Append("\",\"employeeName\":\"").Append(EscapeJson(name))
+                      .Append("\",\"privilege\":").Append(priv[u])
+                      .Append(",\"enabled\":").Append(enable[u] != 0 ? "true" : "false")
+                      .Append(",\"backupNumbers\":[").Append(string.Join(",", bkStr.ToArray())).Append("]")
+                      .Append(",\"fingerprints\":").Append(fp)
+                      .Append(",\"hasPassword\":").Append(hasPwd ? "true" : "false")
+                      .Append(",\"hasCard\":").Append(hasCard ? "true" : "false")
+                      .Append(",\"cardNumber\":\"").Append(card).Append("\"")
+                      .Append(",\"otherBackups\":[").Append(string.Join(",", other.ToArray())).Append("]}");
                 }
                 sb.Append("]");
                 Console.WriteLine(sb.ToString());

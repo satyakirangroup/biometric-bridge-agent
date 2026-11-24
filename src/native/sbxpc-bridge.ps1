@@ -217,7 +217,8 @@ try {
         "get-users" {
             [sbxpc.SBXPCDLL]::EnableDevice($MachineNumber, 0) | Out-Null
             try {
-                $users = New-Object System.Collections.Generic.List[int]
+                $info = @{}          # enroll number -> details gathered from every enrolment record of that user
+                $order = New-Object System.Collections.Generic.List[int]
                 $empMap = @{}
                 $logsDir = Join-Path $BaseDir "logs"
                 if (-not (Test-Path $logsDir)) { New-Item -ItemType Directory -Path $logsDir -Force | Out-Null }
@@ -225,42 +226,52 @@ try {
                 if (Test-Path $empMapFile) {
                     try {
                         $loadedMap = Get-Content $empMapFile -Raw | ConvertFrom-Json
-                        foreach ($prop in $loadedMap.PSObject.Properties) {
-                            $empMap[$prop.Name] = $prop.Value
-                        }
+                        foreach ($prop in $loadedMap.PSObject.Properties) { $empMap[$prop.Name] = $prop.Value }
                     } catch {}
                 }
 
                 if ([sbxpc.SBXPCDLL]::ReadAllUserID($MachineNumber)) {
                     $uEnroll = 0; $uEmach = 0; $uBackup = 0; $uPriv = 0; $uEnable = 0
                     while ([sbxpc.SBXPCDLL]::GetAllUserID($MachineNumber, [ref]$uEnroll, [ref]$uEmach, [ref]$uBackup, [ref]$uPriv, [ref]$uEnable)) {
-                        if (-not $users.Contains($uEnroll)) {
-                            $users.Add($uEnroll)
+                        if (-not $info.ContainsKey($uEnroll)) {
+                            $order.Add($uEnroll)
+                            $info[$uEnroll] = @{ backups = New-Object System.Collections.Generic.List[int]; priv = [int]$uPriv; enable = [int]$uEnable }
                             $uStr = [string]$uEnroll
                             if (-not $empMap.ContainsKey($uStr) -or [string]::IsNullOrWhiteSpace($empMap[$uStr])) {
                                 $uName = ""
                                 [sbxpc.SBXPCDLL]::GetUserName1($MachineNumber, $uEnroll, [ref]$uName) | Out-Null
-                                if (-not [string]::IsNullOrWhiteSpace($uName)) {
-                                    $empMap[$uStr] = $uName
-                                }
+                                if (-not [string]::IsNullOrWhiteSpace($uName)) { $empMap[$uStr] = $uName }
                             }
                         }
+                        if (-not $info[$uEnroll].backups.Contains([int]$uBackup)) { $info[$uEnroll].backups.Add([int]$uBackup) }
                     }
-                    try {
-                        [System.IO.File]::WriteAllText($empMapFile, ($empMap | ConvertTo-Json), (New-Object System.Text.UTF8Encoding($false)))
-                    } catch {}
+                    try { [System.IO.File]::WriteAllText($empMapFile, ($empMap | ConvertTo-Json), (New-Object System.Text.UTF8Encoding($false))) } catch {}
                 }
 
                 $sb = New-Object System.Text.StringBuilder
                 [void]$sb.Append("[")
                 $first = $true
-                foreach ($u in $users) {
+                foreach ($u in $order) {
                     if (-not $first) { [void]$sb.Append(",") }
                     $first = $false
                     $uStr = [string]$u
                     $name = if ($empMap.ContainsKey($uStr)) { [string]$empMap[$uStr] } else { "" }
                     $escName = $name.Replace("\", "\\").Replace('"', '\"')
-                    [void]$sb.Append('{"employeeCode":"' + $uStr + '","employeeName":"' + $escName + '"}')
+                    $d = $info[$u]
+                    $fp = @($d.backups | Where-Object { $_ -ge 0 -and $_ -le 9 }).Count
+                    $hasPwd = $d.backups.Contains(10)
+                    $hasCard = $d.backups.Contains(11)
+                    $other = @($d.backups | Where-Object { $_ -gt 11 })
+                    $card = ""
+                    if ($hasCard) {
+                        try {
+                            $cp = 0; $cn = 0
+                            if ([sbxpc.SBXPCDLL]::GetEnrollData1($MachineNumber, $u, 11, [ref]$cp, [IntPtr]::Zero, [ref]$cn)) { $card = [string]$cn }
+                        } catch {}
+                    }
+                    $bk = ($d.backups | Sort-Object) -join ","
+                    $oth = $other -join ","
+                    [void]$sb.Append('{"employeeCode":"' + $uStr + '","employeeName":"' + $escName + '","privilege":' + $d.priv + ',"enabled":' + ($d.enable -ne 0).ToString().ToLower() + ',"backupNumbers":[' + $bk + '],"fingerprints":' + $fp + ',"hasPassword":' + $hasPwd.ToString().ToLower() + ',"hasCard":' + $hasCard.ToString().ToLower() + ',"cardNumber":"' + $card + '","otherBackups":[' + $oth + ']}')
                 }
                 [void]$sb.Append("]")
                 [Console]::WriteLine($sb.ToString())

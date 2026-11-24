@@ -100,7 +100,9 @@ async function processPendingCommands() {
           const users = all
             .map((u) => ({
               employeeCode: String(u.employeeCode ?? u.EnrollNumber ?? "").trim(),
-              employeeName: String(u.employeeName || "").trim()
+              employeeName: String(u.employeeName || "").trim(),
+              // Extra machine details (present once the bridge is the new build; absent from older SbxpcBridge.exe)
+              ...(u.privilege !== undefined ? { privilege: u.privilege, enabled: u.enabled, backupNumbers: u.backupNumbers, fingerprints: u.fingerprints, hasPassword: u.hasPassword, hasCard: u.hasCard, cardNumber: u.cardNumber || undefined, otherBackups: u.otherBackups } : {})
             }))
             .filter((u) => u.employeeCode && (wanted.size === 0 || wanted.has(u.employeeCode)));
           log("SUCCESS", `✅ [GET USERS] Read ${all.length} user(s) from machine, returning ${users.length}.`);
