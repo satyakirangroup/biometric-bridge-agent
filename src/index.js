@@ -44,7 +44,7 @@ async function processPendingCommands() {
 
       try {
         if (action === "SET_USER" || action === "CREATE_USER") {
-          const empCode = payload.employeeCode || payload.enrollNumber || payload.UserId || payload.tatempcode;
+          const empCode = payload.enrollNumber || payload.punchId || payload.employeeCode || payload.UserId || payload.tatempcode;
           const empName = payload.employeeName || payload.name || payload.UserName || "";
           const priv = Number(payload.privilege || 0);
           const enabled = payload.enabled !== false;
@@ -55,7 +55,7 @@ async function processPendingCommands() {
           await pusher.acknowledgeCommand(cmdId, "SUCCESS");
 
         } else if (action === "UPDATE_USER") {
-          const empCode = payload.employeeCode || payload.enrollNumber || payload.UserId || payload.tatempcode;
+          const empCode = payload.enrollNumber || payload.punchId || payload.employeeCode || payload.UserId || payload.tatempcode;
           if (!empCode) throw new Error("Missing employeeCode in command data");
 
           await connector.updateUser(empCode, {
@@ -67,7 +67,7 @@ async function processPendingCommands() {
           await pusher.acknowledgeCommand(cmdId, "SUCCESS");
 
         } else if (action === "DELETE_USER" || action === "REMOVE_USER") {
-          const empCode = payload.employeeCode || payload.enrollNumber || payload.UserId;
+          const empCode = payload.enrollNumber || payload.punchId || payload.employeeCode || payload.UserId;
           if (!empCode) throw new Error("Missing employeeCode in command data");
 
           await connector.deleteUser(empCode);
@@ -75,7 +75,7 @@ async function processPendingCommands() {
           await pusher.acknowledgeCommand(cmdId, "SUCCESS");
 
         } else if (action === "ENABLE_USER" || action === "DISABLE_USER") {
-          const empCode = payload.employeeCode || payload.enrollNumber || payload.UserId;
+          const empCode = payload.enrollNumber || payload.punchId || payload.employeeCode || payload.UserId;
           if (!empCode) throw new Error("Missing employeeCode in command data");
           const flag = action === "ENABLE_USER" ? 1 : 0;
 
